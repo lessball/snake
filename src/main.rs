@@ -34,7 +34,7 @@ impl Leader {
             self.records.push(MoveRecord {
                 time,
                 distance: last.distance + dis_sq.sqrt(),
-                position: position,
+                position
             });
         } else if self.records.len() <= 1
             || last.distance - self.records[self.records.len() - 2].distance > 0.0001
@@ -42,7 +42,7 @@ impl Leader {
             self.records.push(MoveRecord {
                 time,
                 distance: last.distance,
-                position: position,
+                position
             });
         } else {
             let len = self.records.len();
@@ -65,10 +65,8 @@ impl Leader {
                 / (self.records[find0].time - self.records[find0 - 1].time);
             (1.0 - k) * self.records[find0 - 1].distance + k * self.records[find0].distance
                 - distance
-        } else if find0 <= 0 {
+        } else{
             self.records[0].distance - distance
-        } else {
-            self.records[self.records.len() - 1].distance - distance
         };
         let find1 = match self
             .records
@@ -83,10 +81,8 @@ impl Leader {
             self.records[find1 - 1]
                 .position
                 .lerp(self.records[find1].position, k)
-        } else if find1 <= 0 {
-            (self.records[0].position + Vec2::new(dis, 0.0)).into()
         } else {
-            self.records[self.records.len() - 1].position
+            self.records[0].position + Vec2::new(dis - self.records[0].distance, 0.0)
         }
     }
 }
@@ -136,7 +132,7 @@ fn update(
         const SPEED: f32 = 120.0;
         let mut leader_dir = dir;
         if mousebutton_input.pressed(MouseButton::Left) {
-            if let Some(p) = cursor_pos.clone() {
+            if let Some(p) = cursor_pos {
                 let t = p - leader_pos;
                 if t.length_squared() > 1.0 {
                     leader_dir = t.normalize();
@@ -324,7 +320,7 @@ fn setup(
         .spawn_bundle(SpriteBundle {
             sprite: Sprite::new(Vec2::ONE),
             material: materials.add(get_color(0.0).into()),
-            mesh: circle.clone(),
+            mesh: circle,
             ..Default::default()
         })
         .insert(Leader::new(followers));
