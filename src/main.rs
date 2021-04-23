@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 const RADIUS: f32 = 30.0;
-const RADIUS_HARD: f32 = 20.0;
+const RADIUS_HARD: f32 = 25.0;
 const DISTANCE: f32 = 80.0;
 
 #[derive(Clone, Copy)]
@@ -34,7 +34,7 @@ impl Leader {
             self.records.push(MoveRecord {
                 time,
                 distance: last.distance + dis_sq.sqrt(),
-                position
+                position,
             });
         } else if self.records.len() <= 1
             || last.distance - self.records[self.records.len() - 2].distance > 0.0001
@@ -42,7 +42,7 @@ impl Leader {
             self.records.push(MoveRecord {
                 time,
                 distance: last.distance,
-                position
+                position,
             });
         } else {
             let len = self.records.len();
@@ -65,7 +65,7 @@ impl Leader {
                 / (self.records[find0].time - self.records[find0 - 1].time);
             (1.0 - k) * self.records[find0 - 1].distance + k * self.records[find0].distance
                 - distance
-        } else{
+        } else {
             self.records[0].distance - distance
         };
         let find1 = match self
@@ -87,13 +87,11 @@ impl Leader {
     }
 }
 
-struct Follower {
-    pub last_target: Vec2, //TODO
-}
+struct Follower {}
 
 impl Follower {
-    pub fn new(pos: Vec2) -> Self {
-        Follower { last_target: pos }
+    pub fn new() -> Self {
+        Follower {}
     }
 }
 
@@ -128,7 +126,9 @@ fn update(
         }
     }
     query_leader.for_each_mut(|(entity, mut leader)| {
-        let mut leader_pos = query_trans.get_mut(entity).map_or(Vec2::ZERO, |tm| tm.translation.truncate());
+        let mut leader_pos = query_trans
+            .get_mut(entity)
+            .map_or(Vec2::ZERO, |tm| tm.translation.truncate());
         const SPEED: f32 = 120.0;
         let mut leader_dir = dir;
         if mousebutton_input.pressed(MouseButton::Left) {
@@ -155,25 +155,43 @@ fn update(
                 leader.get_record(now - offset * 0.1, offset * DISTANCE)
             })
             .collect();
-        for _ in 0..10 {
-            for i in 0..target.len() {
-                let v = target[i] - leader_pos;
-                if v.length_squared() < RADIUS * RADIUS * 4.0 {
-                    target[i] = leader_pos + v * (2.0 * RADIUS / v.length());
-                }
-            }
-            for i in 0..target.len() - 1 {
+
+        let mut hit = vec![false; target.len()];
+        for i in 0..target.len() - 1 {
+            if !hit[i] {
                 for j in i + 1..target.len() {
-                    let v = target[j] - target[i];
-                    if v.length_squared() < RADIUS * RADIUS * 4.0 {
-                        let center = (target[i] + target[j]) * 0.5;
-                        let r = v * (RADIUS / v.length());
-                        target[i] = center - r;
-                        target[j] = center + r;
+                    if !hit[j] {
+                        let v = target[j] - target[i];
+                        if v.length_squared() + 0.01 < RADIUS * RADIUS * 4.0 {
+                            let off0 = (i + 1) as f32;
+                            let dir0 = (target[i]
+                                - leader.get_record(now - off0 * 0.1, off0 * DISTANCE + 4.0))
+                            .normalize_or_zero();
+                            let off1 = (j + 1) as f32;
+                            let dir1 = (target[j]
+                                - leader.get_record(now - off1 * 0.1, off1 * DISTANCE + 4.0))
+                            .normalize_or_zero();
+                            let len = v.length();
+                            if dir0.dot(v) > 0.0 && dir1.dot(v) < 0.0 {
+                                hit[i] = true;
+                                hit[j] = true;
+                                let cross0 = dir0.x * v.y - dir0.y * v.x;
+                                let cross1 = dir1.x * v.y - dir1.y * v.x;
+                                let slide_len = (RADIUS * RADIUS * 4.0 - len * len).sqrt() * 0.5;
+                                let mut slide = Vec2::new(-v.y, v.x) * (slide_len / len);
+                                if cross0 > cross1 {
+                                    slide *= -1.0;
+                                }
+                                target[i] += slide;
+                                target[j] -= slide;
+                                break;
+                            }
+                        }
                     }
                 }
             }
         }
+
         let mut position: Vec<_> = leader
             .followers
             .iter()
@@ -186,57 +204,28 @@ fn update(
                 }
             })
             .collect();
-
-        let move_step = time.delta_seconds() * SPEED * 1.25 / 5.0;
-        let mut move_delta = vec![Vec2::ZERO; position.len()];
-        for _ in 0..5 {
+        let step_count = 5;
+        let time_step = time.delta_seconds() / step_count as f32;
+        for step in 0..step_count {
             for i in 0..position.len() {
                 let v = target[i] - position[i];
-                if v.length_squared() <= move_step * move_step {
-                    move_delta[i] = v;
-                    position[i] = target[i];
+                let len = v.length();
+                let limit = (len / (step_count - step) as f32).min(SPEED * time_step * 2.0);
+                if len > limit {
+                    position[i] += v * (limit / len);
                 } else {
-                    move_delta[i] = v * (move_step / v.length());
-                    position[i] += move_delta[i];
-                }
-            }
-            for i in 0..position.len() {
-                let v = position[i] - leader_pos;
-                if v.length_squared() < RADIUS_HARD * RADIUS_HARD * 4.0 {
-                    let len = v.length();
-                    let rot = if leader_delta.dot(v) < 0.0 || move_delta[i].dot(v) > 0.0 {
-                        0.0
-                    } else if leader_delta.x * v.y - leader_delta.y * v.x
-                        > move_delta[i].x * v.y - move_delta[i].y * v.x
-                    {
-                        1.0
-                    } else {
-                        -1.0
-                    } * (2.0 - len / RADIUS_HARD);
-                    let (sinr, cosr) = (rot + v.y.atan2(v.x)).sin_cos();
-                    let r = Vec2::new(cosr, sinr) * (2.0 * RADIUS_HARD);
-                    position[i] = leader_pos + r;
+                    position[i] = target[i];
                 }
             }
             for i in 0..position.len() - 1 {
                 for j in i + 1..position.len() {
                     let v = position[j] - position[i];
                     if v.length_squared() < RADIUS_HARD * RADIUS_HARD * 4.0 {
-                        let center = (position[i] + position[j]) * 0.5;
                         let len = v.length();
-                        let rot = if move_delta[i].dot(v) < 0.0 || move_delta[j].dot(v) > 0.0 {
-                            0.0
-                        } else if move_delta[i].x * v.y - move_delta[i].y * v.x
-                            > move_delta[j].x * v.y - move_delta[j].y * v.x
-                        {
-                            1.0
-                        } else {
-                            -1.0
-                        } * (2.0 - len / RADIUS_HARD);
-                        let (sinr, cosr) = (rot + v.y.atan2(v.x)).sin_cos();
-                        let r = Vec2::new(cosr, sinr) * RADIUS_HARD;
-                        position[i] = center - r;
-                        position[j] = center + r;
+                        let d = (RADIUS_HARD - len * 0.5).min(SPEED * time_step * 2.0);
+                        let pop = v * (d / len);
+                        position[j] += pop;
+                        position[i] -= pop;
                     }
                 }
             }
@@ -311,7 +300,7 @@ fn setup(
                     transform: Transform::from_translation(pos.extend(0.0)),
                     ..Default::default()
                 })
-                .insert(Follower::new(pos))
+                .insert(Follower::new())
                 .id()
         })
         .collect();
