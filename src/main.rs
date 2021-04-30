@@ -103,22 +103,20 @@ fn update(
     query_leader: Query<(Entity, &mut Leader)>,
     mut query_trans: Query<&mut Transform>,
 ) {
-    let mut dir = Vec2::ZERO;
+    let mut input_dir = Vec2::ZERO;
     if keyboard_input.pressed(KeyCode::W) {
-        dir.y += 1.0;
+        input_dir.y += 1.0;
     }
     if keyboard_input.pressed(KeyCode::A) {
-        dir.x -= 1.0;
+        input_dir.x -= 1.0;
     }
     if keyboard_input.pressed(KeyCode::S) {
-        dir.y -= 1.0;
+        input_dir.y -= 1.0;
     }
     if keyboard_input.pressed(KeyCode::D) {
-        dir.x += 1.0;
+        input_dir.x += 1.0;
     }
-    if dir.length_squared() > 0.1 {
-        dir = dir.normalize();
-    }
+    input_dir = input_dir.normalize_or_zero();
     let mut cursor_pos = None;
     if let Some(win) = windows.get_primary() {
         if let Some(p) = win.cursor_position() {
@@ -130,7 +128,7 @@ fn update(
             .get_mut(entity)
             .map_or(Vec2::ZERO, |tm| tm.translation.truncate());
         const SPEED: f32 = 120.0;
-        let mut leader_dir = dir;
+        let mut leader_dir = input_dir;
         if mousebutton_input.pressed(MouseButton::Left) {
             if let Some(p) = cursor_pos {
                 let t = p - leader_pos;
@@ -155,8 +153,30 @@ fn update(
                 leader.get_record(now - offset * 0.1, offset * DISTANCE)
             })
             .collect();
-
+            
         let mut hit = vec![false; target.len()];
+        for i in 0..target.len() {
+            let v = target[i] - leader_pos;
+            if v.length_squared() + 0.01 < RADIUS * RADIUS * 4.0 {
+                let dir0 = (leader_pos - leader.get_record(now, 4.0)).normalize_or_zero();
+                let off1 = (i + 1) as f32;
+                let dir1 = (target[i]
+                    - leader.get_record(now - off1 * 0.1, off1 * DISTANCE + 4.0))
+                    .normalize_or_zero();
+                let len = v.length();
+                if dir0.dot(v) > 0.0 && dir1.dot(v) < 0.0 {
+                    hit[i] = true;
+                    let cross0 = dir0.x * v.y - dir0.y * v.x;
+                    let cross1 = dir1.x * v.y - dir1.y * v.x;
+                    let slide_len = (RADIUS * RADIUS * 4.0 - len * len).sqrt();
+                    let mut slide = Vec2::new(-v.y, v.x) * (slide_len / len);
+                    if cross0 > cross1 {
+                        slide *= -1.0;
+                    }
+                    target[i] -= slide;
+                }
+            }
+        }
         for i in 0..target.len() - 1 {
             if !hit[i] {
                 for j in i + 1..target.len() {
@@ -208,15 +228,27 @@ fn update(
         let time_step = time.delta_seconds() / step_count as f32;
         for step in 0..step_count {
             for i in 0..position.len() {
-                let v = target[i] - position[i];
-                let len = v.length();
-                let limit = (len / (step_count - step) as f32).min(SPEED * time_step * 2.0);
-                if len > limit {
-                    position[i] += v * (limit / len);
-                } else {
-                    position[i] = target[i];
+                let mut delta = target[i] - position[i];
+                let delta_len = delta.length();
+                if delta_len > 0.0001 {
+                    let move_len = (delta_len / (step_count - step) as f32).min(SPEED * time_step * 2.0);
+                    delta *= move_len / delta_len;
                 }
+                let mut pos = position[i] + delta;
+
+                let to_leader = pos - leader_pos;
+                if to_leader.length_squared() < RADIUS_HARD * RADIUS_HARD * 4.0 {
+                    if target[i].distance_squared(leader_pos) < RADIUS_HARD * RADIUS_HARD * 0.25 {
+                        pos = position[i];
+                    } else {
+                        let len = to_leader.length();
+                        let d = (RADIUS_HARD - len * 0.5).min(SPEED * time_step * 2.0);
+                        pos += to_leader * (d / len);
+                    }
+                }
+                position[i] = pos;
             }
+
             for i in 0..position.len() - 1 {
                 for j in i + 1..position.len() {
                     let v = position[j] - position[i];
