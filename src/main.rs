@@ -1,88 +1,24 @@
 use bevy::prelude::*;
 
+mod snake_move;
+use snake_move::*;
+
 const RADIUS: f32 = 30.0;
 const RADIUS_HARD: f32 = 25.0;
 const DISTANCE: f32 = 80.0;
 
-#[derive(Clone, Copy)]
-struct MoveRecord {
-    time: f32,
-    distance: f32,
-    position: Vec2,
-}
-
 struct Leader {
-    records: Vec<MoveRecord>,
+    snake: SnakeMove,
     followers: Vec<Entity>,
 }
 
 impl Leader {
     pub fn new(followers: Vec<Entity>) -> Self {
+        let mut snake = SnakeMove::new();
+        snake.reset(Vec2::ZERO, Vec2::X, 0.0);
         Leader {
-            records: vec![MoveRecord {
-                time: 0.0,
-                distance: 0.0,
-                position: Vec2::ZERO,
-            }],
+            snake,
             followers,
-        }
-    }
-    pub fn record(&mut self, position: Vec2, time: f32) {
-        let last = self.records[self.records.len() - 1];
-        let dis_sq = position.distance_squared(last.position);
-        if dis_sq > 0.0001 {
-            self.records.push(MoveRecord {
-                time,
-                distance: last.distance + dis_sq.sqrt(),
-                position,
-            });
-        } else if self.records.len() <= 1
-            || last.distance - self.records[self.records.len() - 2].distance > 0.0001
-        {
-            self.records.push(MoveRecord {
-                time,
-                distance: last.distance,
-                position,
-            });
-        } else {
-            let len = self.records.len();
-            self.records[len - 1].time = time;
-        }
-        if self.records.len() > 2048 {
-            self.records.drain(..128);
-        }
-    }
-    pub fn get_record(&self, time: f32, distance: f32) -> Vec2 {
-        let find0 = match self
-            .records
-            .binary_search_by(|rec| rec.time.partial_cmp(&time).unwrap())
-        {
-            Ok(i) => i,
-            Err(i) => i,
-        };
-        let dis = if find0 > 0 && find0 < self.records.len() {
-            let k = (time - self.records[find0 - 1].time)
-                / (self.records[find0].time - self.records[find0 - 1].time);
-            (1.0 - k) * self.records[find0 - 1].distance + k * self.records[find0].distance
-                - distance
-        } else {
-            self.records[0].distance - distance
-        };
-        let find1 = match self
-            .records
-            .binary_search_by(|rec| rec.distance.partial_cmp(&dis).unwrap())
-        {
-            Ok(i) => i,
-            Err(i) => i,
-        };
-        if find1 > 0 && find1 < self.records.len() {
-            let k = (dis - self.records[find1 - 1].distance)
-                / (self.records[find1].distance - self.records[find1 - 1].distance);
-            self.records[find1 - 1]
-                .position
-                .lerp(self.records[find1].position, k)
-        } else {
-            self.records[0].position + Vec2::new(dis - self.records[0].distance, 0.0)
         }
     }
 }
@@ -127,7 +63,7 @@ fn update(
         let mut leader_pos = query_trans
             .get_mut(entity)
             .map_or(Vec2::ZERO, |tm| tm.translation.truncate());
-        const SPEED: f32 = 120.0;
+        const SPEED: f32 = 300.0;
         let mut leader_dir = input_dir;
         if mousebutton_input.pressed(MouseButton::Left) {
             if let Some(p) = cursor_pos {
@@ -139,133 +75,35 @@ fn update(
                 }
             }
         };
-        let leader_delta = leader_dir * (time.delta_seconds() * SPEED);
+        let delta_time = time.delta_seconds();
+        let leader_delta = leader_dir * (delta_time * SPEED);
         leader_pos += leader_delta;
         if let Ok(mut tm) = query_trans.get_mut(entity) {
             tm.translation = leader_pos.extend(0.0);
         }
         let now = time.seconds_since_startup() as f32;
-        leader.record(leader_pos, now);
+        leader.snake.record(leader_pos, now);
 
-        let mut target: Vec<_> = (0..leader.followers.len())
-            .map(|i| {
-                let offset = (i + 1) as f32;
-                leader.get_record(now - offset * 0.1, offset * DISTANCE)
-            })
-            .collect();
-            
-        let mut hit = vec![false; target.len()];
-        for i in 0..target.len() {
-            let v = target[i] - leader_pos;
-            if v.length_squared() + 0.01 < RADIUS * RADIUS * 4.0 {
-                let dir0 = (leader_pos - leader.get_record(now, 4.0)).normalize_or_zero();
-                let off1 = (i + 1) as f32;
-                let dir1 = (target[i]
-                    - leader.get_record(now - off1 * 0.1, off1 * DISTANCE + 4.0))
-                    .normalize_or_zero();
-                let len = v.length();
-                if dir0.dot(v) > 0.0 && dir1.dot(v) < 0.0 {
-                    hit[i] = true;
-                    let cross0 = dir0.x * v.y - dir0.y * v.x;
-                    let cross1 = dir1.x * v.y - dir1.y * v.x;
-                    let slide_len = (RADIUS * RADIUS * 4.0 - len * len).sqrt();
-                    let mut slide = Vec2::new(-v.y, v.x) * (slide_len / len);
-                    if cross0 > cross1 {
-                        slide *= -1.0;
-                    }
-                    target[i] -= slide;
-                }
-            }
-        }
-        for i in 0..target.len() - 1 {
-            if !hit[i] {
-                for j in i + 1..target.len() {
-                    if !hit[j] {
-                        let v = target[j] - target[i];
-                        if v.length_squared() + 0.01 < RADIUS * RADIUS * 4.0 {
-                            let off0 = (i + 1) as f32;
-                            let dir0 = (target[i]
-                                - leader.get_record(now - off0 * 0.1, off0 * DISTANCE + 4.0))
-                            .normalize_or_zero();
-                            let off1 = (j + 1) as f32;
-                            let dir1 = (target[j]
-                                - leader.get_record(now - off1 * 0.1, off1 * DISTANCE + 4.0))
-                            .normalize_or_zero();
-                            let len = v.length();
-                            if dir0.dot(v) > 0.0 && dir1.dot(v) < 0.0 {
-                                hit[i] = true;
-                                hit[j] = true;
-                                let cross0 = dir0.x * v.y - dir0.y * v.x;
-                                let cross1 = dir1.x * v.y - dir1.y * v.x;
-                                let slide_len = (RADIUS * RADIUS * 4.0 - len * len).sqrt() * 0.5;
-                                let mut slide = Vec2::new(-v.y, v.x) * (slide_len / len);
-                                if cross0 > cross1 {
-                                    slide *= -1.0;
-                                }
-                                target[i] += slide;
-                                target[j] -= slide;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut position: Vec<_> = leader
+        let mut positions: Vec<_> = leader
             .followers
             .iter()
-            .enumerate()
-            .map(|(i, e)| {
-                if let Ok(tm) = query_trans.get_mut(*e) {
-                    tm.translation.truncate()
-                } else {
-                    target[i]
-                }
+            .map(|e| {
+                query_trans.get_mut(*e).map_or(Vec2::ZERO, |tm| tm.translation.truncate())
             })
             .collect();
-        let step_count = 5;
-        let time_step = time.delta_seconds() / step_count as f32;
-        for step in 0..step_count {
-            for i in 0..position.len() {
-                let mut delta = target[i] - position[i];
-                let delta_len = delta.length();
-                if delta_len > 0.0001 {
-                    let move_len = (delta_len / (step_count - step) as f32).min(SPEED * time_step * 2.0);
-                    delta *= move_len / delta_len;
-                }
-                let mut pos = position[i] + delta;
-
-                let to_leader = pos - leader_pos;
-                if to_leader.length_squared() < RADIUS_HARD * RADIUS_HARD * 4.0 {
-                    if target[i].distance_squared(leader_pos) < RADIUS_HARD * RADIUS_HARD * 0.25 {
-                        pos = position[i];
-                    } else {
-                        let len = to_leader.length();
-                        let d = (RADIUS_HARD - len * 0.5).min(SPEED * time_step * 2.0);
-                        pos += to_leader * (d / len);
-                    }
-                }
-                position[i] = pos;
-            }
-
-            for i in 0..position.len() - 1 {
-                for j in i + 1..position.len() {
-                    let v = position[j] - position[i];
-                    if v.length_squared() < RADIUS_HARD * RADIUS_HARD * 4.0 {
-                        let len = v.length();
-                        let d = (RADIUS_HARD - len * 0.5).min(SPEED * time_step * 2.0);
-                        let pop = v * (d / len);
-                        position[j] += pop;
-                        position[i] -= pop;
-                    }
-                }
-            }
+        let step_count = (delta_time * 600.0).floor().max(1.0).min(5.0);
+        let step_time = delta_time / step_count;
+        for _ in 0..step_count as i32 {
+            leader.snake.solve_followers(&mut positions,
+                |i| ((i + 1) as f32 * 0.1, (i + 1) as f32 * DISTANCE),
+                RADIUS,
+                RADIUS_HARD,
+                step_time * SPEED * 2.0
+            );
         }
-
         for (i, e) in leader.followers.iter().enumerate() {
             if let Ok(mut tm) = query_trans.get_mut(*e) {
-                tm.translation = position[i].extend(0.0);
+                tm.translation = positions[i].extend(0.0);
             }
         }
     });
