@@ -11,31 +11,26 @@ const SPEED: f32 = 300.0;
 struct Leader {
     snake_head: SnakeHead,
     followers: Vec<Entity>,
+    snake_bodys: Vec<SnakeBody>,
 }
 
 impl Leader {
-    pub fn new(followers: Vec<Entity>) -> Self {
-        let mut snake_head = SnakeHead::new();
-        snake_head.reset(Vec2::ZERO, 0.0);
-        Leader {
-            snake_head,
-            followers,
+    fn update_body<F>(&mut self, f: F)
+    where
+        F: Fn(&Entity, &mut SnakeBody),
+    {
+        for (entity, body) in self.followers.iter().zip(self.snake_bodys.iter_mut()) {
+            f(entity, body);
         }
+    }
+    fn solve_body(&mut self, step_time: f32) {
+        self.snake_head
+            .solve_body(&mut self.snake_bodys, step_time, SPEED, RADIUS);
     }
 }
 
 #[derive(Component)]
-struct Follower {
-    snake_body: SnakeBody,
-}
-
-impl Follower {
-    pub fn new(delay: f32, distance: f32, position: Vec2) -> Self {
-        Follower {
-            snake_body: SnakeBody::new(delay, distance, position),
-        }
-    }
-}
+struct Follower;
 
 fn leader_move(
     time: Res<Time>,
@@ -89,31 +84,23 @@ fn leader_move(
 
 fn follower_move(
     time: Res<Time>,
-    query_leader: Query<&Leader>,
-    mut query_follower: Query<(&mut Follower, &mut Transform)>,
+    mut query_leader: Query<&mut Leader>,
+    mut query_follower: Query<&mut Transform, With<Follower>>,
 ) {
-    for leader in query_leader.iter() {
-        let mut bodys: Vec<_> = leader
-            .followers
-            .iter()
-            .map(|e| {
-                query_follower
-                    .get(*e)
-                    .map(|(f, _)| f.snake_body.clone())
-                    .unwrap_or_default()
-            })
-            .collect();
+    for mut leader in query_leader.iter_mut() {
+        leader.update_body(|entity, body| {
+            if let Ok(tm) = query_follower.get(*entity) {
+                body.position = tm.translation.truncate();
+            }
+        });
         let delta_time = time.delta_seconds();
         let step_count = (delta_time * 300.0).floor().max(1.0).min(5.0);
         let step_time = delta_time / step_count;
         for _ in 0..step_count as i32 {
-            leader
-                .snake_head
-                .solve_body(&mut bodys, step_time, SPEED, RADIUS);
+            leader.solve_body(step_time);
         }
-        for (body, entity) in bodys.into_iter().zip(leader.followers.iter()) {
-            if let Ok((mut follower, mut tm)) = query_follower.get_mut(*entity) {
-                follower.snake_body = body.clone();
+        for (entity, body) in leader.followers.iter().zip(leader.snake_bodys.iter()) {
+            if let Ok(mut tm) = query_follower.get_mut(*entity) {
                 tm.translation = body.position.extend(0.0);
             }
         }
@@ -122,34 +109,50 @@ fn follower_move(
 
 fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     let sprite_handle = assets.load("circle.png");
-    let followers: Vec<_> = (1..10)
+    let snake_bodys: Vec<_> = (1..10)
         .map(|i| {
-            let pos = Vec2::new(i as f32 * -DISTANCE, 0.0);
+            SnakeBody::new(
+                i as f32 * 0.1,
+                i as f32 * DISTANCE,
+                Vec2::new(i as f32 * -DISTANCE, 0.0),
+            )
+        })
+        .collect();
+    let followers: Vec<_> = snake_bodys
+        .iter()
+        .enumerate()
+        .map(|(i, body)| {
             commands
                 .spawn_bundle(SpriteBundle {
                     texture: sprite_handle.clone(),
-                    transform: Transform::from_translation(pos.extend(0.0)),
+                    transform: Transform::from_translation(body.position.extend(0.0)),
                     sprite: Sprite {
-                        color: Color::hsl(i as f32 * 36.0, 1.0, 0.5),
+                        color: Color::hsl((i + 1) as f32 * 36.0, 1.0, 0.5),
                         ..Default::default()
                     },
                     ..Default::default()
                 })
-                .insert(Follower::new(i as f32 * 0.1, i as f32 * DISTANCE, pos))
+                .insert(Follower {})
                 .id()
         })
         .collect();
-    commands.spawn_bundle(OrthographicCameraBundle::new_2d());
+    let mut snake_head = SnakeHead::new();
+    snake_head.reset(Vec2::ZERO, 0.0);
     commands
         .spawn_bundle(SpriteBundle {
-            texture: sprite_handle.clone(),
+            texture: sprite_handle,
             sprite: Sprite {
                 color: Color::hsl(0.0, 1.0, 0.5),
                 ..Default::default()
             },
             ..Default::default()
         })
-        .insert(Leader::new(followers));
+        .insert(Leader {
+            snake_head,
+            snake_bodys,
+            followers,
+        });
+    commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 }
 
 fn main() {

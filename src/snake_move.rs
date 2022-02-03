@@ -114,7 +114,7 @@ impl SnakeHead {
             .iter()
             .zip(target.iter())
             .map(|(b, t)| {
-                let mut pos = t.clone();
+                let mut pos = *t;
                 let v = pos - b.position;
                 if v.length_squared() > max_move * max_move {
                     pos = b.position + v * (max_move / v.length());
@@ -180,8 +180,8 @@ impl SnakeHead {
 
 #[derive(Clone, Default)]
 pub struct SnakeBody {
-    delay: f32,
-    distance: f32,
+    pub delay: f32,
+    pub distance: f32,
     pub position: Vec2,
 }
 
