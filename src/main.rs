@@ -104,6 +104,9 @@ fn follower_move(
                 tm.translation = body.position.extend(0.0);
             }
         }
+        // if let Ok(tm) = query_follower.get(leader.followers[0]) {
+        //     println!("{}", tm.translation.x);
+        // }
     }
 }
 
@@ -155,12 +158,21 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 }
 
+pub struct SnakePlugin;
+
+impl Plugin for SnakePlugin {
+    fn build(&self, app: &mut App) {
+        app
+            .add_system(leader_move)
+            .add_system(follower_move)
+            .add_startup_system(setup);
+    }
+}
+
 fn main() {
     App::new()
         .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(DefaultPlugins)
-        .add_startup_system(setup)
-        .add_system(leader_move)
-        .add_system(follower_move)
+        .add_plugin(SnakePlugin)
         .run();
 }
