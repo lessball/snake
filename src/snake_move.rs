@@ -1,97 +1,129 @@
 use bevy::math::*;
 
+struct DistanceRecord {
+    time: f32,
+    distance: f32
+}
+
+struct PositionRecord {
+    distance: f32,
+    position: Vec2
+}
+
 pub struct SnakeHead {
     position: Vec2,
-    distance_record: Vec<(f32, f32)>,
-    position_record: Vec<(f32, Vec2)>
+    dis_rec: Vec<DistanceRecord>,
+    pos_rec: Vec<PositionRecord>
 }
 
 impl SnakeHead {
     pub fn new() -> Self {
         Self {
             position: Vec2::ZERO,
-            distance_record: Vec::new(),
-            position_record: Vec::new()
+            dis_rec: Vec::new(),
+            pos_rec: Vec::new()
         }
     }
 
     pub fn reset(&mut self, position: Vec2, time: f32) {
-        self.distance_record.clear();
-        self.position_record.clear();
-        self.distance_record.push((time, 0.0));
-        self.position_record.push((0.0, position));
+        self.position = position;
+        self.dis_rec.clear();
+        self.pos_rec.clear();
+        self.dis_rec.push(DistanceRecord {
+            time,
+            distance: 0.0
+        });
+        self.pos_rec.push(PositionRecord{
+            distance: 0.0,
+            position
+        });
     }
 
     pub fn move_head(&mut self, position: Vec2, time: f32) {
         self.position = position;
-        let n_dis = self.distance_record.len();
-        let n_pos = self.position_record.len();
+        let n_dis = self.dis_rec.len();
+        let n_pos = self.pos_rec.len();
         if n_dis > 0 && n_pos > 0 {
-            let last_dis = self.distance_record[n_dis - 1].1;
+            // move back, remove position record
+            let last_dis = self.dis_rec[n_dis - 1].distance;
             let max_back = 40.0;
             let mut min_dis = f32::MAX;
             let mut index = usize::MAX;
             for i in (0..n_pos-1).rev() {
-                let p = &self.position_record[i];
-                if p.0 < last_dis - max_back {
+                let p = &self.pos_rec[i];
+                if p.distance < last_dis - max_back {
                     break;
                 }
-                let dis = p.1.distance_squared(position);
+                let dis = p.position.distance_squared(position);
                 if dis < min_dis {
                     min_dis = dis;
                     index = i;
                 }
             }
             if index < n_pos {
-                let p = &self.position_record[index];
-                if p.1.distance(position) + p.0 < last_dis {
-                    self.position_record.truncate(index + 1);
+                let p = &self.pos_rec[index];
+                if p.position.distance(position) + p.distance < last_dis {
+                    self.pos_rec.truncate(index + 1);
                 }
             }
-            if let Some(p) = self.position_record.last() {
-                let delta = p.1.distance(position);
-                let new_dis = last_dis.max(p.0 + delta);
-                if n_dis > 1 && new_dis - self.distance_record[n_dis - 2].1 < 0.0001 {
-                    self.distance_record[n_dis - 1].0 = time;
-                } else {
-                    self.distance_record.push((time, new_dis));
+
+            // add record
+            let last_pos = self.pos_rec.last().unwrap();
+            let delta = last_pos.position.distance(position);
+            let new_dis = last_dis.max(last_pos.distance + delta);
+            if n_dis > 1 && new_dis - self.dis_rec[n_dis - 2].distance < 0.0001 {
+                // merge same distance record
+                self.dis_rec[n_dis - 1].time = time;
+            } else {
+                self.dis_rec.push(DistanceRecord{
+                    time,
+                    distance: new_dis
+                });
                 }
                 let min_step = 5.0;
                 if delta >= min_step {
-                    let dis = p.0 + delta;
-                    self.position_record.push((dis, position));
+                    let distance = last_pos.distance + delta;
+                    self.pos_rec.push(PositionRecord {
+                        distance,
+                        position
+                    });
                 }
-            }
-        } else {
+                if self.dis_rec.len() > 2048 {
+                    self.dis_rec.drain(..128);
+                }
+                if self.pos_rec.len() >= 2048 {
+                    self.pos_rec.drain(..128);
+                }
+            } else {
             self.reset(position, time);
         }
     }
 
     pub fn get_record(&self, delay: f32, distance: f32) -> (Vec2, f32) {
-        if let Some(d) = self.distance_record.last() {
-            let time = d.0 - delay;
-            let p_dis = match self.distance_record.binary_search_by(|(t, _)| t.partial_cmp(&time).unwrap()) {
+        if let Some(last_dis_rec) = self.dis_rec.last() {
+            let time = last_dis_rec.time - delay;
+            let p_dis = match self.dis_rec.binary_search_by(|d| d.time.partial_cmp(&time).unwrap()) {
                 Ok(p) => p,
                 Err(p) => p
             };
             if p_dis == 0 {
-                return (self.position_record[0].1, distance);
+                return (self.pos_rec[0].position, distance);
             }
-            let dis_rec0 = self.distance_record[p_dis - 1];
-            let dis_rec1 = self.distance_record[p_dis];
-            let k_dis = (time - dis_rec0.0) / (dis_rec1.0 - dis_rec0.0);
-            let dis = k_dis * (dis_rec1.1 - dis_rec0.1) + dis_rec0.1 - distance;
-            let p_pos = match self.position_record.binary_search_by(|(d, _)| d.partial_cmp(&dis).unwrap()) {
+            let dis_rec0 = &self.dis_rec[p_dis - 1];
+            let dis_rec1 = &self.dis_rec[p_dis];
+            let k_dis = (time - dis_rec0.time) / (dis_rec1.time - dis_rec0.time);
+            let dis = k_dis * (dis_rec1.distance - dis_rec0.distance) + dis_rec0.distance - distance;
+            let p_pos = match self.pos_rec.binary_search_by(|p| p.distance.partial_cmp(&dis).unwrap()) {
                 Ok(p) => p,
                 Err(p) => p
             };
             if p_pos > 0 {
-                let pos_rec0 = &self.position_record[p_pos - 1];
-                let pos_rec1 = &self.position_record[p_pos];
-                let k_pos = (dis - pos_rec0.0) / (pos_rec1.0 - pos_rec0.0);
-                (pos_rec0.1.lerp(pos_rec1.1, k_pos), 0.0)
+                let pos_rec0 = &self.pos_rec[p_pos - 1];
+                let pos_rec1 = &self.pos_rec[p_pos];
+                let k_pos = (dis - pos_rec0.distance) / (pos_rec1.distance - pos_rec0.distance);
+                (pos_rec0.position.lerp(pos_rec1.position, k_pos), 0.0)
             } else {
-                (self.position_record[0].1, self.position_record[0].0 - dis)
+                (self.pos_rec[0].position, self.pos_rec[0].distance - dis)
             }
         } else {
             (self.position, distance)

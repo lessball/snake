@@ -111,7 +111,7 @@ fn follower_move(
 }
 
 fn setup(mut commands: Commands, assets: Res<AssetServer>) {
-    let sprite_handle = assets.load("circle.png");
+    let sprite_handle = assets.load("circle.dds");
     let snake_bodys: Vec<_> = (1..10)
         .map(|i| {
             SnakeBody::new(
