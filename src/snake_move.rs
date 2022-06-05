@@ -2,18 +2,18 @@ use bevy::math::*;
 
 struct DistanceRecord {
     time: f32,
-    distance: f32
+    distance: f32,
 }
 
 struct PositionRecord {
     distance: f32,
-    position: Vec2
+    position: Vec2,
 }
 
 pub struct SnakeHead {
     position: Vec2,
     dis_rec: Vec<DistanceRecord>,
-    pos_rec: Vec<PositionRecord>
+    pos_rec: Vec<PositionRecord>,
 }
 
 impl SnakeHead {
@@ -21,7 +21,7 @@ impl SnakeHead {
         Self {
             position: Vec2::ZERO,
             dis_rec: Vec::new(),
-            pos_rec: Vec::new()
+            pos_rec: Vec::new(),
         }
     }
 
@@ -31,11 +31,11 @@ impl SnakeHead {
         self.pos_rec.clear();
         self.dis_rec.push(DistanceRecord {
             time,
-            distance: 0.0
-        });
-        self.pos_rec.push(PositionRecord{
             distance: 0.0,
-            position
+        });
+        self.pos_rec.push(PositionRecord {
+            distance: 0.0,
+            position,
         });
     }
 
@@ -49,7 +49,7 @@ impl SnakeHead {
             let max_back = 40.0;
             let mut min_dis = f32::MAX;
             let mut index = usize::MAX;
-            for i in (0..n_pos-1).rev() {
+            for i in (0..n_pos - 1).rev() {
                 let p = &self.pos_rec[i];
                 if p.distance < last_dis - max_back {
                     break;
@@ -75,102 +75,129 @@ impl SnakeHead {
                 // merge same distance record
                 self.dis_rec[n_dis - 1].time = time;
             } else {
-                self.dis_rec.push(DistanceRecord{
+                self.dis_rec.push(DistanceRecord {
                     time,
-                    distance: new_dis
+                    distance: new_dis,
                 });
-                }
-                let min_step = 5.0;
-                if delta >= min_step {
-                    let distance = last_pos.distance + delta;
-                    self.pos_rec.push(PositionRecord {
-                        distance,
-                        position
-                    });
-                }
-                if self.dis_rec.len() > 2048 {
-                    self.dis_rec.drain(..128);
-                }
-                if self.pos_rec.len() >= 2048 {
-                    self.pos_rec.drain(..128);
-                }
-            } else {
+            }
+            let min_step = 5.0;
+            if delta >= min_step {
+                let distance = last_pos.distance + delta;
+                self.pos_rec.push(PositionRecord { distance, position });
+            }
+            if self.dis_rec.len() > 2048 {
+                self.dis_rec.drain(..128);
+            }
+            if self.pos_rec.len() >= 2048 {
+                self.pos_rec.drain(..128);
+            }
+        } else {
             self.reset(position, time);
         }
     }
 
-    pub fn get_record(&self, delay: f32, distance: f32) -> (Vec2, f32) {
-        if let Some(last_dis_rec) = self.dis_rec.last() {
-            let time = last_dis_rec.time - delay;
-            let p_dis = match self.dis_rec.binary_search_by(|d| d.time.partial_cmp(&time).unwrap()) {
-                Ok(p) => p,
-                Err(p) => p
-            };
-            if p_dis == 0 {
-                return (self.pos_rec[0].position, distance);
-            }
-            let dis_rec0 = &self.dis_rec[p_dis - 1];
-            let dis_rec1 = &self.dis_rec[p_dis];
-            let k_dis = (time - dis_rec0.time) / (dis_rec1.time - dis_rec0.time);
-            let dis = k_dis * (dis_rec1.distance - dis_rec0.distance) + dis_rec0.distance - distance;
-            let p_pos = match self.pos_rec.binary_search_by(|p| p.distance.partial_cmp(&dis).unwrap()) {
-                Ok(p) => p,
-                Err(p) => p
-            };
-            if p_pos > 0 {
-                let pos_rec0 = &self.pos_rec[p_pos - 1];
-                let pos_rec1 = &self.pos_rec[p_pos];
-                let k_pos = (dis - pos_rec0.distance) / (pos_rec1.distance - pos_rec0.distance);
-                (pos_rec0.position.lerp(pos_rec1.position, k_pos), 0.0)
-            } else {
-                (self.pos_rec[0].position, self.pos_rec[0].distance - dis)
-            }
+    pub fn get_distance(&self, time: f32) -> f32 {
+        let p = match self
+            .dis_rec
+            .binary_search_by(|d| d.time.partial_cmp(&time).unwrap())
+        {
+            Ok(p) => p,
+            Err(p) => p,
+        };
+        if p > 0 && p < self.dis_rec.len() {
+            let dis_rec0 = &self.dis_rec[p - 1];
+            let dis_rec1 = &self.dis_rec[p];
+            let k = (time - dis_rec0.time) / (dis_rec1.time - dis_rec0.time);
+            k * (dis_rec1.distance - dis_rec0.distance) + dis_rec0.distance
+        } else if !self.dis_rec.is_empty() {
+            let p1 = p.min(self.dis_rec.len() - 1);
+            self.dis_rec[p1].distance
         } else {
-            (self.position, distance)
+            0.0
         }
     }
 
-    pub fn solve_body(&self, body: &mut [SnakeBody], dt: f32, speed: f32, radius: f32) {
+    pub fn get_position(&self, distance: f32) -> (Vec2, f32) {
+        let p = match self
+            .pos_rec
+            .binary_search_by(|p| p.distance.partial_cmp(&distance).unwrap())
+        {
+            Ok(p) => p,
+            Err(p) => p,
+        };
+        if p > 0 && p < self.pos_rec.len() {
+            let pos_rec0 = &self.pos_rec[p - 1];
+            let pos_rec1 = &self.pos_rec[p];
+            let k = (distance - pos_rec0.distance) / (pos_rec1.distance - pos_rec0.distance);
+            (pos_rec0.position.lerp(pos_rec1.position, k), 0.0)
+        } else if !self.pos_rec.is_empty() {
+            let p1 = p.min(self.pos_rec.len() - 1);
+            (
+                self.pos_rec[p1].position,
+                self.pos_rec[p1].distance - distance,
+            )
+        } else {
+            (Vec2::ZERO, 0.0)
+        }
+    }
+
+    pub fn solve_body(
+        &self,
+        body: &mut [SnakeBody],
+        dt: f32,
+        speed: f32,
+        radius: f32,
+    ) -> Vec<Vec2> {
         let max_move = dt * speed * 2.0;
         let head_pos = self.position;
 
-        let target: Vec<_> = body
+        let (target, target_move): (Vec<_>, Vec<_>) = body
             .iter()
             .map(|b| {
-                let (p, d) = self.get_record(b.delay, b.distance);
-                if d <= 0.0 {
-                    p
-                } else {
+                let time = self.dis_rec.last().map_or(0.0, |rec| rec.time - b.delay);
+                let distance = self.get_distance(time);
+                let (mut p, d) = self.get_position(distance - b.distance);
+                if d > 0.0 {
                     let v = b.position - p;
                     if v.length_squared() > d * d {
-                        p + v * (d / v.length())
+                        p += v * (d / v.length());
                     } else {
-                        b.position
+                        p = b.position;
                     }
                 }
+                let tmove = distance - self.get_distance(time - 0.1) > 0.0001;
+                (p, tmove)
             })
-            .collect();
-        let mut positions_new: Vec<_> = body
-            .iter()
-            .zip(target.iter())
-            .map(|(b, t)| {
-                let mut pos = *t;
-                let v = pos - b.position;
-                if v.length_squared() > max_move * max_move {
-                    pos = b.position + v * (max_move / v.length());
-                }
-                pos
-            })
-            .collect();
+            .unzip();
+        let head_move = if self.dis_rec.len() > 1 {
+            let last = &self.dis_rec[self.dis_rec.len() - 1];
+            let prev = &self.dis_rec[self.dis_rec.len() - 2];
+            last.distance > prev.distance + 0.001 || last.time < prev.time + 0.1
+        } else {
+            false
+        };
 
+        let mut positions_new: Vec<_> = body.iter().map(|b| b.position).collect();
+        let mut active_move = target_move.clone();
+        let overlap_d0 = Self::overlap_distance(head_pos, &positions_new, radius);
+        for (p, t) in positions_new.iter_mut().zip(target.iter()) {
+            let v = *t - *p;
+            if v.length_squared() > max_move * max_move {
+                *p += v * (max_move / v.length());
+            } else {
+                *p = *t;
+            }
+        }
+
+        let max_pop = max_move * 0.5;
         for _ in 0..4 {
             for i in 0..body.len() {
                 let v = positions_new[i] - head_pos;
                 if v.length_squared() < radius * radius * 4.0 {
                     let len = v.length();
-                    let pop_dis = (radius * 2.0 - len).min(max_move);
+                    let pop_dis = (radius * 2.0 - len).min(max_pop);
                     if v.dot(target[i] - head_pos) < -0.001 {
-                        let mut angle = pop_dis * 0.5 / radius;
+                        let mut angle = pop_dis * 0.25 / radius;
                         let dir = target[i] - positions_new[i];
                         let cross = dir.x * v.y - dir.y * v.x;
                         if 0.0 < cross {
@@ -181,6 +208,9 @@ impl SnakeHead {
                     } else {
                         positions_new[i] += v * (pop_dis / len);
                     }
+                    if head_move {
+                        active_move[i] = true;
+                    }
                 }
             }
             for i in 0..body.len() - 1 {
@@ -188,7 +218,7 @@ impl SnakeHead {
                     let v = positions_new[j] - positions_new[i];
                     if v.length_squared() < radius * radius * 4.0 {
                         let len = v.length();
-                        let pop_dis = (radius - len * 0.5).min(max_move);
+                        let pop_dis = (radius - len * 0.5).min(max_pop);
                         if v.dot(target[j] - target[i]) < -0.001 {
                             let mut angle = pop_dis / radius;
                             let dir0 = target[i] - positions_new[i];
@@ -208,13 +238,42 @@ impl SnakeHead {
                             positions_new[i] -= pop;
                             positions_new[j] += pop;
                         }
+                        if target_move[i] {
+                            active_move[j] = true;
+                        }
+                        if target_move[j] {
+                            active_move[i] = true;
+                        }
                     }
                 }
             }
         }
+        let overlap_d1 = Self::overlap_distance(head_pos, &positions_new, radius);
         for i in 0..body.len() {
-            body[i].position = positions_new[i];
+            if active_move[i] || overlap_d1[i] < overlap_d0[i] {
+                body[i].position = positions_new[i];
+            }
         }
+        target
+    }
+
+    fn overlap_distance(head_pos: Vec2, body_pos: &[Vec2], radius: f32) -> Vec<f32> {
+        let mut result = vec![0.0; body_pos.len()];
+        for i in 0..body_pos.len() {
+            let d1 = body_pos[i].distance_squared(head_pos);
+            if d1 < radius * radius * 4.0 {
+                result[i] += radius * 2.0 - d1.sqrt();
+            }
+            for j in i + 1..body_pos.len() {
+                let d2 = body_pos[i].distance_squared(body_pos[j]);
+                if d2 < radius * radius * 4.0 {
+                    let d = radius * 2.0 - d2.sqrt();
+                    result[i] += d;
+                    result[j] += d;
+                }
+            }
+        }
+        result
     }
 }
 

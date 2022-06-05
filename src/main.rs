@@ -12,6 +12,7 @@ struct Leader {
     snake_head: SnakeHead,
     followers: Vec<Entity>,
     snake_bodys: Vec<SnakeBody>,
+    targets: Vec<Entity>,
 }
 
 impl Leader {
@@ -23,9 +24,9 @@ impl Leader {
             f(entity, body);
         }
     }
-    fn solve_body(&mut self, step_time: f32) {
+    fn solve_body(&mut self, step_time: f32) -> Vec<Vec2> {
         self.snake_head
-            .solve_body(&mut self.snake_bodys, step_time, SPEED, RADIUS);
+            .solve_body(&mut self.snake_bodys, step_time, SPEED, RADIUS)
     }
 }
 
@@ -85,7 +86,7 @@ fn leader_move(
 fn follower_move(
     time: Res<Time>,
     mut query_leader: Query<&mut Leader>,
-    mut query_follower: Query<&mut Transform, With<Follower>>,
+    mut query_follower: Query<&mut Transform>,
 ) {
     for mut leader in query_leader.iter_mut() {
         leader.update_body(|entity, body| {
@@ -94,24 +95,23 @@ fn follower_move(
             }
         });
         let delta_time = time.delta_seconds();
-        let step_count = (delta_time * 300.0).floor().max(1.0).min(5.0);
-        let step_time = delta_time / step_count;
-        for _ in 0..step_count as i32 {
-            leader.solve_body(step_time);
-        }
+        let target = leader.solve_body(delta_time);
         for (entity, body) in leader.followers.iter().zip(leader.snake_bodys.iter()) {
             if let Ok(mut tm) = query_follower.get_mut(*entity) {
                 tm.translation = body.position.extend(0.0);
             }
         }
-        // if let Ok(tm) = query_follower.get(leader.followers[0]) {
-        //     println!("{}", tm.translation.x);
-        // }
+        for (entity, pos) in leader.targets.iter().zip(target.into_iter()) {
+            if let Ok(mut tm) = query_follower.get_mut(*entity) {
+                tm.translation = pos.extend(0.0);
+            }
+        }
     }
 }
 
 fn setup(mut commands: Commands, assets: Res<AssetServer>) {
-    let sprite_handle = assets.load("circle.dds");
+    let sprite_handle = assets.load("ring.png");
+    let cross = assets.load("cross.png");
     let snake_bodys: Vec<_> = (1..10)
         .map(|i| {
             SnakeBody::new(
@@ -139,6 +139,23 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                 .id()
         })
         .collect();
+    let targets: Vec<_> = snake_bodys
+        .iter()
+        .enumerate()
+        .map(|(i, body)| {
+            commands
+                .spawn_bundle(SpriteBundle {
+                    texture: cross.clone(),
+                    transform: Transform::from_translation(body.position.extend(0.0)),
+                    sprite: Sprite {
+                        color: Color::hsl((i + 1) as f32 * 36.0, 1.0, 0.5),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .id()
+        })
+        .collect();
     let mut snake_head = SnakeHead::new();
     snake_head.reset(Vec2::ZERO, 0.0);
     commands
@@ -154,6 +171,7 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
             snake_head,
             snake_bodys,
             followers,
+            targets,
         });
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 }
@@ -162,8 +180,7 @@ pub struct SnakePlugin;
 
 impl Plugin for SnakePlugin {
     fn build(&self, app: &mut App) {
-        app
-            .add_system(leader_move)
+        app.add_system(leader_move)
             .add_system(follower_move)
             .add_startup_system(setup);
     }
