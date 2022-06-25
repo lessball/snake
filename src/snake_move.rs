@@ -224,7 +224,7 @@ impl SnakeHead {
                     let len = v.length();
                     let pop_dis = (radius * 2.0 - len).min(max_pop * 1.5);
                     if v.dot(body_move[i].target - head_pos) < -0.001 {
-                        let mut angle = pop_dis * 0.25 / radius;
+                        let mut angle = pop_dis * 0.125 / radius;
                         let dir = body_move[i].target - body_move[i].position;
                         let cross = dir.x * v.y - dir.y * v.x;
                         if 0.0 < cross {
@@ -245,7 +245,7 @@ impl SnakeHead {
                         let len = v.length();
                         let pop_dis = (radius - len * 0.5).min(max_pop);
                         if v.dot(body_move[j].target - body_move[i].target) < -0.001 {
-                            let mut angle = pop_dis / radius;
+                            let mut angle = pop_dis / radius * 0.25;
                             let dir0 = body_move[i].target - body_move[i].position;
                             let dir1 = body_move[j].target - body_move[j].position;
                             let cross0 = dir0.x * v.y - dir0.y * v.x;
