@@ -14,14 +14,18 @@ pub struct SnakeHead {
     position: Vec2,
     dis_rec: Vec<DistanceRecord>,
     pos_rec: Vec<PositionRecord>,
+    max_delay: f32,
+    max_distance: f32
 }
 
 impl SnakeHead {
-    pub fn new() -> Self {
+    pub fn new(max_delay: f32, max_distance: f32) -> Self {
         Self {
             position: Vec2::ZERO,
             dis_rec: Vec::new(),
             pos_rec: Vec::new(),
+            max_delay,
+            max_distance
         }
     }
 
@@ -85,10 +89,10 @@ impl SnakeHead {
                 let distance = last_pos.distance + delta;
                 self.pos_rec.push(PositionRecord { distance, position });
             }
-            if self.dis_rec.len() > 2048 {
+            if self.dis_rec.len() > 128 && self.dis_rec[128].time + self.max_delay < self.dis_rec.last().unwrap().time {
                 self.dis_rec.drain(..128);
             }
-            if self.pos_rec.len() >= 2048 {
+            if self.pos_rec.len() > 128 && self.pos_rec[128].distance + self.max_distance < self.pos_rec.last().unwrap().distance {
                 self.pos_rec.drain(..128);
             }
         } else {
@@ -280,6 +284,10 @@ impl SnakeHead {
             }
         }
         body_move.iter().map(|body| body.target).collect()
+    }
+
+    pub fn get_path(&self) -> Vec<Vec2> {
+        self.pos_rec.iter().map(|r| r.position).collect()
     }
 }
 

@@ -1,7 +1,12 @@
 use bevy::prelude::*;
+use bevy::render::mesh::{VertexAttributeValues, PrimitiveTopology, Indices};
+use bevy::sprite::Mesh2dHandle;
 
 mod snake_move;
 use snake_move::*;
+
+mod line_poly;
+use line_poly::LinePoly;
 
 const RADIUS: f32 = 30.0;
 const DISTANCE: f32 = 80.0;
@@ -109,9 +114,49 @@ fn follower_move(
     }
 }
 
-fn setup(mut commands: Commands, assets: Res<AssetServer>) {
-    let sprite_handle = assets.load("ring.png");
-    let cross = assets.load("cross.png");
+fn update_path(
+    mut meshes: ResMut<Assets<Mesh>>,
+    query_leader: Query<&Leader>,
+    query_mesh: Query<&Mesh2dHandle>) {
+    for (leader, mesh) in query_leader.iter().zip(query_mesh.iter()) {
+        if let Some(m) = meshes.get_mut(&mesh.0) {
+            let poly = LinePoly::from_line(leader.snake_head.get_path(), 1.0);
+            if let Some(VertexAttributeValues::Float32x3(pos)) = m.attribute_mut(Mesh::ATTRIBUTE_POSITION.id) {
+                pos.clear();
+                pos.extend(poly.vertices.iter().map(|v| [v.x, v.y, 0.0]));
+            }
+            if let Some(VertexAttributeValues::Float32x3(nor)) = m.attribute_mut(Mesh::ATTRIBUTE_NORMAL.id) {
+                nor.resize(poly.vertices.len(), [0.0,0.0,1.0]);
+            }
+            if let Some(VertexAttributeValues::Float32x2(uv)) = m.attribute_mut(Mesh::ATTRIBUTE_UV_0.id) {
+                uv.resize(poly.vertices.len(), [0.0,0.0]);
+            }
+            if let Some(Indices::U32(ind)) = m.indices_mut() {
+                *ind = poly.indices;
+            }
+        }
+    }
+}
+
+fn setup(mut commands: Commands,
+    assets: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>) {
+
+    let mut path_mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    path_mesh.set_indices(Some(Indices::U32(Vec::new())));
+    path_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32;3]>::new());
+    path_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, Vec::<[f32;3]>::new());
+    path_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, Vec::<[f32;2]>::new());
+    commands.spawn_bundle(ColorMesh2dBundle  {
+        mesh: meshes.add(path_mesh).into(),
+        transform: Transform::default(),
+        material: materials.add(ColorMaterial::from(Color::GRAY)),
+        ..default()
+    });
+
+    let sprite_handle = assets.load("ring.dds");
+    let cross = assets.load("cross.dds");
     let snake_bodys: Vec<_> = (1..10)
         .map(|i| {
             SnakeBody::new(
@@ -156,7 +201,7 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                 .id()
         })
         .collect();
-    let mut snake_head = SnakeHead::new();
+    let mut snake_head = SnakeHead::new(snake_bodys.last().unwrap().delay * 2.0, snake_bodys.last().unwrap().distance * 2.0);
     snake_head.reset(Vec2::ZERO, 0.0);
     commands
         .spawn_bundle(SpriteBundle {
@@ -182,6 +227,7 @@ impl Plugin for SnakePlugin {
     fn build(&self, app: &mut App) {
         app.add_system(leader_move)
             .add_system(follower_move)
+            .add_system(update_path)
             .add_startup_system(setup);
     }
 }
