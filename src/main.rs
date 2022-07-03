@@ -138,6 +138,11 @@ fn update_path(
     }
 }
 
+fn color(i: usize) -> Color {
+    let l = if i % 2 == 0 { 0.5 } else { 0.4 };
+    Color::hsl(i as f32 * 36.0, 1.0, l)
+}
+
 fn setup(mut commands: Commands,
     assets: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -175,7 +180,7 @@ fn setup(mut commands: Commands,
                     texture: sprite_handle.clone(),
                     transform: Transform::from_translation(body.position.extend(0.0)),
                     sprite: Sprite {
-                        color: Color::hsl((i + 1) as f32 * 36.0, 1.0, 0.5),
+                        color: color(i + 1),
                         ..Default::default()
                     },
                     ..Default::default()
@@ -193,7 +198,7 @@ fn setup(mut commands: Commands,
                     texture: cross.clone(),
                     transform: Transform::from_translation(body.position.extend(0.0)),
                     sprite: Sprite {
-                        color: Color::hsl((i + 1) as f32 * 36.0, 1.0, 0.5),
+                        color: color(i + 1),
                         ..Default::default()
                     },
                     ..Default::default()
@@ -207,7 +212,7 @@ fn setup(mut commands: Commands,
         .spawn_bundle(SpriteBundle {
             texture: sprite_handle,
             sprite: Sprite {
-                color: Color::hsl(0.0, 1.0, 0.5),
+                color: color(0),
                 ..Default::default()
             },
             ..Default::default()

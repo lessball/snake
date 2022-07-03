@@ -22,10 +22,10 @@ impl LinePoly {
             for i in 1..line.len() {
                 if flip {
                     let v = vertices.len() as u32 - 2;
-                    indices.extend_from_slice(&[v + 1, v, v + 2, v + 3, v + 2, v]);
+                    indices.extend([v + 1, v, v + 2, v + 3, v + 2, v]);
                 } else {
                     let v = vertices.len() as u32 - 2;
-                    indices.extend_from_slice(&[v, v + 1, v + 2, v + 3, v + 2, v + 1]);
+                    indices.extend([v, v + 1, v + 2, v + 3, v + 2, v + 1]);
                 };
                 let n;
                 if i + 1 < line.len() {
