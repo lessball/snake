@@ -15,7 +15,7 @@ pub struct SnakeHead {
     dis_rec: Vec<DistanceRecord>,
     pos_rec: Vec<PositionRecord>,
     max_delay: f32,
-    max_distance: f32
+    max_distance: f32,
 }
 
 impl SnakeHead {
@@ -25,7 +25,7 @@ impl SnakeHead {
             dis_rec: Vec::new(),
             pos_rec: Vec::new(),
             max_delay,
-            max_distance
+            max_distance,
         }
     }
 
@@ -89,10 +89,15 @@ impl SnakeHead {
                 let distance = last_pos.distance + delta;
                 self.pos_rec.push(PositionRecord { distance, position });
             }
-            if self.dis_rec.len() > 128 && self.dis_rec[128].time + self.max_delay < self.dis_rec.last().unwrap().time {
+            if self.dis_rec.len() > 128
+                && self.dis_rec[128].time + self.max_delay < self.dis_rec.last().unwrap().time
+            {
                 self.dis_rec.drain(..128);
             }
-            if self.pos_rec.len() > 128 && self.pos_rec[128].distance + self.max_distance < self.pos_rec.last().unwrap().distance {
+            if self.pos_rec.len() > 128
+                && self.pos_rec[128].distance + self.max_distance
+                    < self.pos_rec.last().unwrap().distance
+            {
                 self.pos_rec.drain(..128);
             }
         } else {
@@ -154,7 +159,7 @@ impl SnakeHead {
     ) -> Vec<Vec2> {
         let max_move = dt * speed * 2.0;
         let head_pos = self.position;
-        
+
         let head_moving = if self.dis_rec.len() > 1 {
             let last = &self.dis_rec[self.dis_rec.len() - 1];
             let prev = &self.dis_rec[self.dis_rec.len() - 2];
@@ -190,18 +195,21 @@ impl SnakeHead {
                     target,
                     target_moving,
                     self_moving: target_moving,
-                    overlap: [0.0, 0.0]
+                    overlap: [0.0, 0.0],
                 }
-            }).collect();
-        
-        let calc_overlap = |body_move: &mut[BodyMove], target: usize| {
+            })
+            .collect();
+
+        let calc_overlap = |body_move: &mut [BodyMove], target: usize| {
             for i in 0..body_move.len() {
                 let d1 = body_move[i].position.distance_squared(head_pos);
                 if d1 < radius * radius * 4.0 {
-                    body_move[i].overlap[target] +=  radius * 2.0 - d1.sqrt();
+                    body_move[i].overlap[target] += radius * 2.0 - d1.sqrt();
                 }
                 for j in i + 1..body_move.len() {
-                    let d2 = body_move[i].position.distance_squared(body_move[j].position);
+                    let d2 = body_move[i]
+                        .position
+                        .distance_squared(body_move[j].position);
                     if d2 < radius * radius * 4.0 {
                         let d = radius * 2.0 - d2.sqrt();
                         body_move[i].overlap[target] += d;

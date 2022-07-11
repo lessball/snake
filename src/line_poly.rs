@@ -2,7 +2,7 @@ use bevy::math::*;
 
 pub struct LinePoly {
     pub vertices: Vec<Vec2>,
-    pub indices: Vec<u32>
+    pub indices: Vec<u32>,
 }
 
 impl LinePoly {
@@ -14,6 +14,8 @@ impl LinePoly {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
         if line.len() > 1 {
+            vertices.reserve(line.len() * 2);
+            indices.reserve((line.len() - 1) * 6);
             let mut dir = (line[1] - line[0]).normalize_or_zero();
             let mut flip = false;
             let n0 = Self::vertical(dir);
@@ -46,9 +48,6 @@ impl LinePoly {
                 vertices.push(line[i] + n * w1);
             }
         }
-        LinePoly {
-            vertices,
-            indices
-        }
+        LinePoly { vertices, indices }
     }
 }
