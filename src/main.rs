@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
-use bevy::sprite::Mesh2dHandle;
 
 mod snake_move;
 use snake_move::*;
@@ -18,6 +17,7 @@ struct Leader {
     followers: Vec<Entity>,
     snake_bodys: Vec<SnakeBody>,
     targets: Vec<Entity>,
+    path_mesh: Handle<Mesh>
 }
 
 impl Leader {
@@ -116,11 +116,10 @@ fn follower_move(
 
 fn update_path(
     mut meshes: ResMut<Assets<Mesh>>,
-    query_leader: Query<&Leader>,
-    query_mesh: Query<&Mesh2dHandle>,
+    query_leader: Query<&Leader>
 ) {
-    for (leader, mesh) in query_leader.iter().zip(query_mesh.iter()) {
-        if let Some(m) = meshes.get_mut(&mesh.0) {
+    for leader in query_leader.iter() {
+        if let Some(m) = meshes.get_mut(&leader.path_mesh) {
             let poly = LinePoly::from_line(leader.snake_head.get_path(), 1.0);
             if let Some(VertexAttributeValues::Float32x3(pos)) =
                 m.attribute_mut(Mesh::ATTRIBUTE_POSITION.id)
@@ -161,8 +160,9 @@ fn setup(
     path_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new());
     path_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, Vec::<[f32; 3]>::new());
     path_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, Vec::<[f32; 2]>::new());
+    let path_mesh = meshes.add(path_mesh);
     commands.spawn_bundle(ColorMesh2dBundle {
-        mesh: meshes.add(path_mesh).into(),
+        mesh: path_mesh.clone().into(),
         transform: Transform::default(),
         material: materials.add(ColorMaterial::from(Color::GRAY)),
         ..default()
@@ -233,6 +233,7 @@ fn setup(
             snake_bodys,
             followers,
             targets,
+            path_mesh
         });
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 }
