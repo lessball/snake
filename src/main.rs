@@ -20,21 +20,6 @@ struct Leader {
     path_mesh: Handle<Mesh>
 }
 
-impl Leader {
-    fn update_body<F>(&mut self, f: F)
-    where
-        F: Fn(&Entity, &mut SnakeBody),
-    {
-        for (entity, body) in self.followers.iter().zip(self.snake_bodys.iter_mut()) {
-            f(entity, body);
-        }
-    }
-    fn solve_body(&mut self, step_time: f32) -> Vec<Vec2> {
-        self.snake_head
-            .solve_body(&mut self.snake_bodys, step_time, SPEED, RADIUS)
-    }
-}
-
 #[derive(Component)]
 struct Follower;
 
@@ -94,13 +79,14 @@ fn follower_move(
     mut query_follower: Query<&mut Transform>,
 ) {
     for mut leader in query_leader.iter_mut() {
-        leader.update_body(|entity, body| {
+        let leader = &mut *leader;
+        for (entity, body) in leader.followers.iter().zip(leader.snake_bodys.iter_mut()) {
             if let Ok(tm) = query_follower.get(*entity) {
                 body.position = tm.translation.truncate();
             }
-        });
+        }
         let delta_time = time.delta_seconds();
-        let target = leader.solve_body(delta_time);
+        let target = leader.snake_head.solve_body(&mut leader.snake_bodys, delta_time, SPEED, RADIUS);
         for (entity, body) in leader.followers.iter().zip(leader.snake_bodys.iter()) {
             if let Ok(mut tm) = query_follower.get_mut(*entity) {
                 tm.translation = body.position.extend(0.0);
