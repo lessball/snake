@@ -221,7 +221,7 @@ fn setup(
             targets,
             path_mesh
         });
-    commands.spawn_bundle(OrthographicCameraBundle::new_2d());
+    commands.spawn_bundle(Camera2dBundle::default());
 }
 
 pub struct SnakePlugin;
