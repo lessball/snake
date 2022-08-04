@@ -15,14 +15,11 @@ const SPEED: f32 = 300.0;
 #[derive(Component)]
 struct Leader {
     snake_head: SnakeHead,
-    followers: Vec<Entity>,
     snake_bodys: Vec<SnakeBody>,
+    followers: Vec<Entity>,
     targets: Vec<Entity>,
     path_mesh: Handle<Mesh>,
 }
-
-#[derive(Component)]
-struct Follower;
 
 fn leader_move(
     time: Res<Time>,
@@ -185,7 +182,6 @@ fn setup(
                     },
                     ..Default::default()
                 })
-                .insert(Follower {})
                 .id()
         })
         .collect();
