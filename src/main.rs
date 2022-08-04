@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
+use bevy::render::camera::RenderTarget;
 
 mod snake_move;
 use snake_move::*;
@@ -17,7 +18,7 @@ struct Leader {
     followers: Vec<Entity>,
     snake_bodys: Vec<SnakeBody>,
     targets: Vec<Entity>,
-    path_mesh: Handle<Mesh>
+    path_mesh: Handle<Mesh>,
 }
 
 #[derive(Component)]
@@ -26,43 +27,46 @@ struct Follower;
 fn leader_move(
     time: Res<Time>,
     windows: Res<Windows>,
+    camera: Query<(&Camera, &GlobalTransform)>,
     keyboard_input: Res<Input<KeyCode>>,
     mousebutton_input: Res<Input<MouseButton>>,
     mut query_leader: Query<(&mut Leader, &mut Transform)>,
 ) {
-    let mut input_dir = Vec2::ZERO;
-    if keyboard_input.pressed(KeyCode::W) {
-        input_dir.y += 1.0;
-    }
-    if keyboard_input.pressed(KeyCode::A) {
-        input_dir.x -= 1.0;
-    }
-    if keyboard_input.pressed(KeyCode::S) {
-        input_dir.y -= 1.0;
-    }
-    if keyboard_input.pressed(KeyCode::D) {
-        input_dir.x += 1.0;
-    }
-    input_dir = input_dir.normalize_or_zero();
-    let mut cursor_pos = None;
-    if let Some(win) = windows.get_primary() {
-        if let Some(p) = win.cursor_position() {
-            cursor_pos = Some(p - Vec2::new(win.width() as f32, win.height() as f32) * 0.5);
-        }
-    }
+    let input_dir = IVec2::new(
+        keyboard_input.pressed(KeyCode::D) as i32 - keyboard_input.pressed(KeyCode::A) as i32,
+        keyboard_input.pressed(KeyCode::W) as i32 - keyboard_input.pressed(KeyCode::S) as i32,
+    )
+    .as_vec2()
+    .normalize_or_zero();
+    let cursor_pos = if mousebutton_input.pressed(MouseButton::Left) {
+        let (camera, camera_transform) = camera.single();
+        let wnd = if let RenderTarget::Window(id) = camera.target {
+            windows.get(id).unwrap()
+        } else {
+            windows.get_primary().unwrap()
+        };
+        wnd.cursor_position().map(|screen_pos| {
+            let window_size = Vec2::new(wnd.width() as f32, wnd.height() as f32);
+            let ndc = (screen_pos / window_size) * 2.0 - Vec2::ONE;
+            let ndc_to_world = camera_transform.compute_matrix() * camera.projection_matrix().inverse();
+            let world_pos = ndc_to_world.project_point3(ndc.extend(-1.0));
+            world_pos.truncate()
+        })
+    } else {
+        None
+    };
     for (mut leader, mut tm) in query_leader.iter_mut() {
         let mut leader_pos = tm.translation.truncate();
-        let mut leader_dir = input_dir;
-        if mousebutton_input.pressed(MouseButton::Left) {
-            if let Some(p) = cursor_pos {
+        let leader_dir = cursor_pos
+            .map(|p| {
                 let t = p - leader_pos;
                 if t.length_squared() > 1.0 {
-                    leader_dir = t.normalize();
+                    t.normalize()
                 } else {
-                    leader_dir = Vec2::ZERO;
+                    Vec2::ZERO
                 }
-            }
-        };
+            })
+            .unwrap_or(input_dir);
         let delta_time = time.delta_seconds();
         let leader_delta = leader_dir * (delta_time * SPEED);
         leader_pos += leader_delta;
@@ -76,34 +80,36 @@ fn leader_move(
 fn follower_move(
     time: Res<Time>,
     mut query_leader: Query<&mut Leader>,
-    mut query_follower: Query<&mut Transform>,
+    mut query_tm: Query<&mut Transform>,
 ) {
     for mut leader in query_leader.iter_mut() {
         let leader = &mut *leader;
-        for (entity, body) in leader.followers.iter().zip(leader.snake_bodys.iter_mut()) {
-            if let Ok(tm) = query_follower.get(*entity) {
-                body.position = tm.translation.truncate();
-            }
+        for (body, tm) in leader
+            .snake_bodys
+            .iter_mut()
+            .zip(query_tm.iter_many(&leader.followers))
+        {
+            body.position = tm.translation.truncate();
         }
         let delta_time = time.delta_seconds();
-        let target = leader.snake_head.solve_body(&mut leader.snake_bodys, delta_time, SPEED, RADIUS);
-        for (entity, body) in leader.followers.iter().zip(leader.snake_bodys.iter()) {
-            if let Ok(mut tm) = query_follower.get_mut(*entity) {
-                tm.translation = body.position.extend(0.0);
-            }
+        let target =
+            leader
+                .snake_head
+                .solve_body(&mut leader.snake_bodys, delta_time, SPEED, RADIUS);
+        let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
+        let mut iter_body = leader.snake_bodys.iter();
+        while let (Some(mut tm), Some(body)) = (iter_follower_tm.fetch_next(), iter_body.next()) {
+            tm.translation = body.position.extend(0.0);
         }
-        for (entity, pos) in leader.targets.iter().zip(target.into_iter()) {
-            if let Ok(mut tm) = query_follower.get_mut(*entity) {
-                tm.translation = pos.extend(0.0);
-            }
+        let mut iter_target_tm = query_tm.iter_many_mut(&leader.targets);
+        let mut iter_target = target.into_iter();
+        while let (Some(mut tm), Some(target)) = (iter_target_tm.fetch_next(), iter_target.next()) {
+            tm.translation = target.extend(0.0);
         }
     }
 }
 
-fn update_path(
-    mut meshes: ResMut<Assets<Mesh>>,
-    query_leader: Query<&Leader>
-) {
+fn update_path(mut meshes: ResMut<Assets<Mesh>>, query_leader: Query<&Leader>) {
     for leader in query_leader.iter() {
         if let Some(m) = meshes.get_mut(&leader.path_mesh) {
             let poly = LinePoly::from_line(leader.snake_head.get_path(), 1.0);
@@ -219,7 +225,7 @@ fn setup(
             snake_bodys,
             followers,
             targets,
-            path_mesh
+            path_mesh,
         });
     commands.spawn_bundle(Camera2dBundle::default());
 }
