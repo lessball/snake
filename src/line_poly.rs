@@ -13,12 +13,14 @@ impl LinePoly {
     pub fn from_line(mut line: impl Iterator<Item = Vec2>, w: f32) -> Self {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
+        let (line_len, _) = line.size_hint();
         let p0 = line.next();
         let p1 = line.next();
         if let (Some(p0), Some(p1)) = (p0, p1) {
-            let (line_len, _) = line.size_hint();
-            vertices.reserve(line_len * 2);
-            indices.reserve((line_len - 1) * 6);
+            if line_len > 0 {
+                vertices.reserve(line_len * 2);
+                indices.reserve((line_len - 1) * 6);
+            }
             let mut dir = (p1 - p0).normalize_or_zero();
             let mut flip = false;
             let n0 = Self::vertical(dir);
