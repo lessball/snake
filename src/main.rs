@@ -231,7 +231,7 @@ pub struct SnakePlugin;
 impl Plugin for SnakePlugin {
     fn build(&self, app: &mut App) {
         app.add_system(leader_move)
-            .add_system(follower_move)
+            .add_system(follower_move.after(leader_move))
             .add_system(update_path)
             .add_startup_system(setup);
     }
