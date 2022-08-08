@@ -294,8 +294,8 @@ impl SnakeHead {
         body_move.iter().map(|body| body.target).collect()
     }
 
-    pub fn get_path(&self) -> Vec<Vec2> {
-        self.pos_rec.iter().map(|r| r.position).collect()
+    pub fn get_path(&self) -> impl Iterator<Item = Vec2> + '_ {
+        self.pos_rec.iter().map(|r| r.position)
     }
 }
 
