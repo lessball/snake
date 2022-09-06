@@ -152,7 +152,7 @@ impl SnakeHead {
 
     pub fn solve_body(
         &self,
-        body: &mut [SnakeBody],
+        bodies: &mut [SnakeBody],
         dt: f32,
         speed: f32,
         radius: f32,
@@ -175,16 +175,16 @@ impl SnakeHead {
             self_moving: bool,
             overlap: [f32; 2],
         }
-        let mut body_move: Vec<_> = body
+        let mut body_move: Vec<_> = bodies
             .iter()
             .map(|body| {
                 let time = self.dis_rec.last().map_or(0.0, |rec| rec.time - body.delay);
                 let distance = self.get_distance(time);
-                let (mut target, d) = self.get_position(distance - body.distance);
-                if d > 0.0 {
+                let (mut target, remaining) = self.get_position(distance - body.distance);
+                if remaining > 0.0 {
                     let v = body.position - target;
-                    if v.length_squared() > d * d {
-                        target += v * (d / v.length());
+                    if v.length_squared() > remaining * remaining {
+                        target += v * (remaining / v.length());
                     } else {
                         target = body.position;
                     }
@@ -286,7 +286,7 @@ impl SnakeHead {
             }
         }
         calc_overlap(&mut body_move, 1);
-        for (body, body_move) in body.iter_mut().zip(body_move.iter()) {
+        for (body, body_move) in bodies.iter_mut().zip(body_move.iter()) {
             if body_move.self_moving || body_move.overlap[1] < body_move.overlap[0] {
                 body.position = body_move.position;
             }
