@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::render::camera::RenderTarget;
+use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 
 mod snake_move;
 use snake_move::*;
@@ -37,17 +37,14 @@ fn leader_move(
     .normalize_or_zero();
     let cursor_pos = if mousebutton_input.pressed(MouseButton::Left) {
         let (camera, camera_transform) = camera.single();
-        let wnd = if let RenderTarget::Window(id) = camera.target {
-            windows.get(id).unwrap()
-        } else {
-            windows.get_primary().unwrap()
+        let wnd = match camera.target {
+            RenderTarget::Window(id) => windows.get(id).unwrap(),
+            _ => windows.get_primary().unwrap(),
         };
-        wnd.cursor_position().map(|screen_pos| {
-            let window_size = Vec2::new(wnd.width() as f32, wnd.height() as f32);
-            let ndc = (screen_pos / window_size) * 2.0 - Vec2::ONE;
-            let ndc_to_world = camera_transform.compute_matrix() * camera.projection_matrix().inverse();
-            let world_pos = ndc_to_world.project_point3(ndc.extend(-1.0));
-            world_pos.truncate()
+        wnd.cursor_position().and_then(|pos| {
+            camera
+                .viewport_to_world(camera_transform, pos)
+                .map(|ray| ray.origin.truncate())
         })
     } else {
         None
@@ -70,7 +67,7 @@ fn leader_move(
         tm.translation = leader_pos.extend(0.0);
         leader
             .snake_head
-            .move_head(leader_pos, time.seconds_since_startup() as f32);
+            .move_head(leader_pos, time.elapsed_seconds());
     }
 }
 
@@ -150,7 +147,7 @@ fn setup(
     path_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, Vec::<[f32; 3]>::new());
     path_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, Vec::<[f32; 2]>::new());
     let path_mesh = meshes.add(path_mesh);
-    commands.spawn_bundle(ColorMesh2dBundle {
+    commands.spawn(ColorMesh2dBundle {
         mesh: path_mesh.clone().into(),
         transform: Transform::default(),
         material: materials.add(ColorMaterial::from(Color::GRAY)),
@@ -173,7 +170,7 @@ fn setup(
         .enumerate()
         .map(|(i, body)| {
             commands
-                .spawn_bundle(SpriteBundle {
+                .spawn(SpriteBundle {
                     texture: sprite_handle.clone(),
                     transform: Transform::from_translation(body.position.extend(0.0)),
                     sprite: Sprite {
@@ -190,7 +187,7 @@ fn setup(
         .enumerate()
         .map(|(i, body)| {
             commands
-                .spawn_bundle(SpriteBundle {
+                .spawn(SpriteBundle {
                     texture: cross.clone(),
                     transform: Transform::from_translation(body.position.extend(0.0)),
                     sprite: Sprite {
@@ -207,23 +204,24 @@ fn setup(
         snake_bodys.last().unwrap().distance * 2.0,
     );
     snake_head.reset(Vec2::ZERO, 0.0);
-    commands
-        .spawn_bundle(SpriteBundle {
+    commands.spawn((
+        SpriteBundle {
             texture: sprite_handle,
             sprite: Sprite {
                 color: color(0),
                 ..Default::default()
             },
             ..Default::default()
-        })
-        .insert(Leader {
+        },
+        Leader {
             snake_head,
             snake_bodys,
             followers,
             targets,
             path_mesh,
-        });
-    commands.spawn_bundle(Camera2dBundle::default());
+        },
+    ));
+    commands.spawn(Camera2dBundle::default());
 }
 
 pub struct SnakePlugin;
