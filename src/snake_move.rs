@@ -1,17 +1,22 @@
 use bevy::math::*;
+use serde::{Serialize, Deserialize};
 
+#[derive(Clone, Serialize, Deserialize)]
 struct DistanceRecord {
     time: f32,
     distance: f32,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 struct PositionRecord {
     distance: f32,
     position: Vec2,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SnakeHead {
     position: Vec2,
+    time: f32,
     dis_rec: Vec<DistanceRecord>,
     pos_rec: Vec<PositionRecord>,
     max_delay: f32,
@@ -22,6 +27,7 @@ impl SnakeHead {
     pub fn new(max_delay: f32, max_distance: f32) -> Self {
         Self {
             position: Vec2::ZERO,
+            time: 0.0,
             dis_rec: Vec::new(),
             pos_rec: Vec::new(),
             max_delay,
@@ -29,12 +35,13 @@ impl SnakeHead {
         }
     }
 
-    pub fn reset(&mut self, position: Vec2, time: f32) {
+    pub fn reset(&mut self, position: Vec2) {
         self.position = position;
+        self.time = 0.0;
         self.dis_rec.clear();
         self.pos_rec.clear();
         self.dis_rec.push(DistanceRecord {
-            time,
+            time: 0.0,
             distance: 0.0,
         });
         self.pos_rec.push(PositionRecord {
@@ -43,8 +50,13 @@ impl SnakeHead {
         });
     }
 
-    pub fn move_head(&mut self, position: Vec2, time: f32) {
+    pub fn head_position(&self) -> Vec2 {
+        self.position
+    }
+
+    pub fn move_head(&mut self, position: Vec2, dt: f32) {
         self.position = position;
+        self.time += dt;
         let n_dis = self.dis_rec.len();
         let n_pos = self.pos_rec.len();
         if n_dis > 0 && n_pos > 0 {
@@ -77,10 +89,10 @@ impl SnakeHead {
             let new_dis = last_dis.max(last_pos.distance + delta);
             if n_dis > 1 && new_dis - self.dis_rec[n_dis - 2].distance < 0.0001 {
                 // merge same distance record
-                self.dis_rec[n_dis - 1].time = time;
+                self.dis_rec[n_dis - 1].time = self.time;
             } else {
                 self.dis_rec.push(DistanceRecord {
-                    time,
+                    time: self.time,
                     distance: new_dis,
                 });
             }
@@ -101,7 +113,7 @@ impl SnakeHead {
                 self.pos_rec.drain(..128);
             }
         } else {
-            self.reset(position, time);
+            self.reset(position);
         }
     }
 
@@ -150,148 +162,169 @@ impl SnakeHead {
         }
     }
 
+    fn limit_distance(from: Vec2, to: Vec2, distance: f32) -> Vec2 {
+        if distance <= 0.0 {
+            from
+        } else if to.distance_squared(from) > distance * distance {
+            from + (to - from).normalize() * distance
+        } else {
+            to
+        }
+    }
+
+    // pub fn sweep(from: Vec2, to: Vec2, other: Vec2, radius: f32) -> Option<Vec2> {
+    //     Self::toi(from, to - from, other, Vec2::ZERO, radius).map(|t| from + (to - from) * t)
+    // }
+
+    // pub fn toi(p0: Vec2, v0: Vec2, p1: Vec2, v1: Vec2, radius: f32) -> Option<f32> {
+    //     let p2 = p1 - p0;
+    //     let v2 = v1 - v0;
+    //     // (p2 + v2 * t).length() == radius * 2
+    //     let a = v2.length_squared();
+    //     let b = 2.0 * p2.dot(v2);
+    //     let c = p2.length_squared() - radius * radius * 4.0;
+    //     let d = b * b - 4.0 * a * c;
+    //     if a < 0.000001 {
+    //         if c <= 0.0 { //?
+    //             Some(0.0)
+    //         } else {
+    //             None
+    //         }
+    //     } else if d >= 0.0 {
+    //         let t = (-b - d.sqrt()) / (2.0 * a);
+    //         Some(t.max(0.0))
+    //     } else {
+    //         None
+    //     }
+    // }
+
+    pub fn detour(p0: Vec2, v0: Vec2, t0: Vec2, p1: Vec2, v1: Vec2, t1: Vec2) -> Vec2 {
+        let dp = p1 - p0;
+        if dp.dot(t1 - t0) < -0.001 {
+            let mut angle = 4.0 / 64.0;
+            let vertical = Vec2::new(dp.y, -dp.x);
+            if v0.dot(vertical) < v1.dot(vertical) {
+                angle = -angle;
+            }
+            dp - Mat2::from_angle(angle).mul_vec2(dp)
+        } else {
+            Vec2::ZERO
+        }
+    }
+
     pub fn solve_body(
         &self,
         bodies: &mut [SnakeBody],
-        dt: f32,
-        speed: f32,
+        max_move: f32,
         radius: f32,
     ) -> Vec<Vec2> {
-        let max_move = dt * speed * 2.0;
         let head_pos = self.position;
-
-        let head_moving = if self.dis_rec.len() > 1 {
-            let last = &self.dis_rec[self.dis_rec.len() - 1];
-            let prev = &self.dis_rec[self.dis_rec.len() - 2];
-            last.distance > prev.distance + 0.001 || last.time < prev.time + 0.1
-        } else {
-            false
-        };
+        let rr4 = radius * radius * 4.0;
 
         struct BodyMove {
             position: Vec2,
+            delta: Vec2,
+            origin: Vec2,
             target: Vec2,
-            target_moving: bool,
-            self_moving: bool,
-            overlap: [f32; 2],
+            max_move: f32,
         }
         let mut body_move: Vec<_> = bodies
             .iter()
             .map(|body| {
-                let time = self.dis_rec.last().map_or(0.0, |rec| rec.time - body.delay);
+                let time = self.time - body.delay;
                 let distance = self.get_distance(time);
-                let (mut target, remaining) = self.get_position(distance - body.distance);
-                if remaining > 0.0 {
-                    let v = body.position - target;
-                    if v.length_squared() > remaining * remaining {
-                        target += v * (remaining / v.length());
-                    } else {
-                        target = body.position;
-                    }
+                let (target, target_distance) = self.get_position(distance - body.distance);
+                let remain = target.distance(body.position) - target_distance;
+                let k = ((remain / radius - 1.5) / 2.5).max(0.0).min(1.0);
+                let max_move1 = max_move * (k * 0.5 + 1.5);
+                let mut delta = Self::limit_distance(target, body.position, target_distance) - body.position;
+                if delta.length_squared() > max_move1 * max_move1 {
+                    delta = delta.normalize() * max_move1;
                 }
-                let target_moving = distance - self.get_distance(time - 0.1) > 0.0001;
                 BodyMove {
                     position: body.position,
+                    delta: delta,
+                    origin: body.position,
                     target,
-                    target_moving,
-                    self_moving: target_moving,
-                    overlap: [0.0, 0.0],
+                    max_move: max_move1,
                 }
             })
             .collect();
 
-        let calc_overlap = |body_move: &mut [BodyMove], target: usize| {
+        let step = 64;
+        for _ in 0..step {
+            for bm in body_move.iter_mut() {
+                bm.position += bm.delta / step as f32;
+            }
             for i in 0..body_move.len() {
-                let d1 = body_move[i].position.distance_squared(head_pos);
-                if d1 < radius * radius * 4.0 {
-                    body_move[i].overlap[target] += radius * 2.0 - d1.sqrt();
+                if body_move[i].position.distance_squared(head_pos) < rr4 {
+                    let bm0 = &body_move[i];
+                    let v0 = bm0.position - head_pos;
+                    let len = v0.length();
+                    if len > 0.0001 {
+                        body_move[i].position += v0 * (radius * 2.0 / len - 1.0);
+                    }
                 }
                 for j in i + 1..body_move.len() {
-                    let d2 = body_move[i]
-                        .position
-                        .distance_squared(body_move[j].position);
-                    if d2 < radius * radius * 4.0 {
-                        let d = radius * 2.0 - d2.sqrt();
-                        body_move[i].overlap[target] += d;
-                        body_move[j].overlap[target] += d;
+                    let bm0 = &body_move[i];
+                    let bm1 = &body_move[j];
+                    if bm0.position.distance_squared(bm1.position) < rr4 {
+                        let v0 = bm1.position - bm0.position;
+                        let len = v0.length();
+                        if len > 0.0001 {
+                            let d = v0 * (radius / len - 0.5);
+                            body_move[i].position -= d;
+                            body_move[j].position += d;
+                        }
                     }
                 }
             }
-        };
-        calc_overlap(&mut body_move, 0);
-        for body in body_move.iter_mut() {
-            let v = body.target - body.position;
-            if v.length_squared() > max_move * max_move {
-                body.position += v * (max_move / v.length());
-            } else {
-                body.position = body.target;
+            for i in 0..body_move.len() {
+                if body_move[i].position.distance_squared(head_pos) < rr4 * 1.0001 {
+                    let bm0 = &body_move[i];
+                    let detour = Self::detour(bm0.position, bm0.delta, bm0.target, head_pos, Vec2::ZERO, head_pos);
+                    if detour.length_squared() > 0.01 {
+                        let pos = bm0.position + 2.0 * detour;
+                        if pos.distance_squared(head_pos) >= rr4
+                            && body_move.iter()
+                            .enumerate()
+                            .filter(|(j, _)| *j != i)
+                            .all(|(_, bm)| pos.distance_squared(bm.position) >= rr4)
+                        {
+                            body_move[i].position = pos;
+                        }
+                    }
+                }
+                for j in i + 1..body_move.len() {
+                    if body_move[i].position.distance_squared(body_move[j].position) < rr4 {
+                        let bm0 = &body_move[i];
+                        let bm1 = &body_move[j];
+                        let detour = Self::detour(bm0.position, bm0.delta, bm0.target, bm1.position, bm1.delta, bm1.target);
+                        if detour.length_squared() > 0.0001 {
+                            let pos0 = bm0.position + detour;
+                            let pos1 = bm1.position - detour;
+                            if pos0.distance_squared(head_pos) >= rr4 && pos1.distance_squared(head_pos) >= rr4
+                                && body_move.iter()
+                                .enumerate()
+                                .filter(|(k, _)| *k != i && *k != j)
+                                .all(|(_, bm)| pos0.distance_squared(bm.position) >= rr4 && pos1.distance_squared(bm.position) >= rr4)
+                            {
+                                body_move[i].position = pos0;
+                                body_move[j].position = pos1;
+                            }
+                        }
+                    }
+                }
+            }
+            for bm in body_move.iter_mut() {
+                bm.position = Self::limit_distance(bm.origin, bm.position, bm.max_move);
             }
         }
 
-        let max_pop = max_move * 0.5;
-        for _ in 0..4 {
-            for i in 0..body_move.len() {
-                let v = body_move[i].position - head_pos;
-                if v.length_squared() < radius * radius * 4.0 {
-                    let len = v.length();
-                    let pop_dis = (radius * 2.0 - len).min(max_pop * 1.5);
-                    if v.dot(body_move[i].target - head_pos) < -0.001 {
-                        let mut angle = pop_dis * 0.125 / radius;
-                        let dir = body_move[i].target - body_move[i].position;
-                        let cross = dir.x * v.y - dir.y * v.x;
-                        if 0.0 < cross {
-                            angle = -angle;
-                        }
-                        let offset = Mat2::from_angle(angle).mul_vec2(v) * (1.0 + pop_dis / len);
-                        body_move[i].position = head_pos + offset;
-                    } else {
-                        body_move[i].position += v * (pop_dis / len);
-                    }
-                    if head_moving {
-                        body_move[i].self_moving = true;
-                    }
-                }
-                for j in i + 1..body_move.len() {
-                    let v = body_move[j].position - body_move[i].position;
-                    if v.length_squared() < radius * radius * 4.0 {
-                        let len = v.length();
-                        let pop_dis = (radius - len * 0.5).min(max_pop);
-                        if v.dot(body_move[j].target - body_move[i].target) < -0.001 {
-                            let mut angle = pop_dis / radius * 0.25;
-                            let dir0 = body_move[i].target - body_move[i].position;
-                            let dir1 = body_move[j].target - body_move[j].position;
-                            let cross0 = dir0.x * v.y - dir0.y * v.x;
-                            let cross1 = dir1.x * v.y - dir1.y * v.x;
-                            if cross0 < cross1 {
-                                angle = -angle;
-                            }
-                            let offset =
-                                Mat2::from_angle(angle).mul_vec2(v) * (0.5 + pop_dis / len);
-                            let center = (body_move[i].position + body_move[j].position) * 0.5;
-                            body_move[i].position = center - offset;
-                            body_move[j].position = center + offset;
-                        } else {
-                            let pop = v * (pop_dis / len);
-                            body_move[i].position -= pop;
-                            body_move[j].position += pop;
-                        }
-                        if body_move[i].target_moving {
-                            body_move[j].self_moving = true;
-                        }
-                        if body_move[j].target_moving {
-                            body_move[i].self_moving = true;
-                        }
-                    }
-                }
-            }
-        }
-        calc_overlap(&mut body_move, 1);
         for (body, body_move) in bodies.iter_mut().zip(body_move.iter()) {
-            if body_move.self_moving || body_move.overlap[1] < body_move.overlap[0] {
-                body.position = body_move.position;
-            }
+            body.position = body_move.position;
         }
-        body_move.iter().map(|body| body.target).collect()
+        body_move.iter().map(|bm| bm.target).collect()
     }
 
     pub fn get_path(&self) -> impl Iterator<Item = Vec2> + '_ {
@@ -299,7 +332,7 @@ impl SnakeHead {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct SnakeBody {
     pub delay: f32,
     pub distance: f32,
