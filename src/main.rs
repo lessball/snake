@@ -96,7 +96,7 @@ fn follower_move(
         let target =
             leader
                 .snake_head
-                .solve_body(&mut leader.snake_bodys, delta_time * SPEED, RADIUS);
+                .solve_body(&mut leader.snake_bodys, delta_time * SPEED, delta_time * SPEED * 0.1, RADIUS);
         let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
         let mut iter_body = leader.snake_bodys.iter();
         while let (Some(mut tm), Some(body)) = (iter_follower_tm.fetch_next(), iter_body.next()) {
@@ -206,7 +206,7 @@ fn setup(
         ..default()
     });
 
-    let sprite_handle = assets.load("ring.dds");
+    let sprite_handle = assets.load("ring.png");
     let snake_bodys: Vec<_> = (1..10)
         .map(|i| {
             SnakeBody::new(

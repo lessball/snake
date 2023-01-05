@@ -86,8 +86,8 @@ fn test_toi_setup(
     mut commands: Commands,
     assets: Res<AssetServer>,
 ) {
-    let ring_texture = assets.load("ring.dds");
-    let circle_texture = assets.load("circle.dds");
+    let ring_texture = assets.load("ring.png");
+    let circle_texture = assets.load("circle.png");
     for i in 0..2 {
         let fi = i as f32;
         let target = commands
@@ -158,8 +158,8 @@ fn test_relax_setup(
     mut commands: Commands,
     assets: Res<AssetServer>,
 ) {
-    let ring_texture = assets.load("ring.dds");
-    let circle_texture = assets.load("circle.dds");
+    let ring_texture = assets.load("ring.png");
+    let circle_texture = assets.load("circle.png");
     let num = 3;
     for i in 0..num {
         let a = i as f32 / num as f32 * std::f32::consts::PI * 2.0;

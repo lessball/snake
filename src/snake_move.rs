@@ -1,6 +1,8 @@
 use bevy::math::*;
 use serde::{Serialize, Deserialize};
 
+const SOLVE_STEP: i32 = 8;
+
 #[derive(Clone, Serialize, Deserialize)]
 struct DistanceRecord {
     time: f32,
@@ -162,46 +164,10 @@ impl SnakeHead {
         }
     }
 
-    fn limit_distance(from: Vec2, to: Vec2, distance: f32) -> Vec2 {
-        if distance <= 0.0 {
-            from
-        } else if to.distance_squared(from) > distance * distance {
-            from + (to - from).normalize() * distance
-        } else {
-            to
-        }
-    }
-
-    // pub fn sweep(from: Vec2, to: Vec2, other: Vec2, radius: f32) -> Option<Vec2> {
-    //     Self::toi(from, to - from, other, Vec2::ZERO, radius).map(|t| from + (to - from) * t)
-    // }
-
-    // pub fn toi(p0: Vec2, v0: Vec2, p1: Vec2, v1: Vec2, radius: f32) -> Option<f32> {
-    //     let p2 = p1 - p0;
-    //     let v2 = v1 - v0;
-    //     // (p2 + v2 * t).length() == radius * 2
-    //     let a = v2.length_squared();
-    //     let b = 2.0 * p2.dot(v2);
-    //     let c = p2.length_squared() - radius * radius * 4.0;
-    //     let d = b * b - 4.0 * a * c;
-    //     if a < 0.000001 {
-    //         if c <= 0.0 { //?
-    //             Some(0.0)
-    //         } else {
-    //             None
-    //         }
-    //     } else if d >= 0.0 {
-    //         let t = (-b - d.sqrt()) / (2.0 * a);
-    //         Some(t.max(0.0))
-    //     } else {
-    //         None
-    //     }
-    // }
-
     pub fn detour(p0: Vec2, v0: Vec2, t0: Vec2, p1: Vec2, v1: Vec2, t1: Vec2) -> Vec2 {
         let dp = p1 - p0;
         if dp.dot(t1 - t0) < -0.001 {
-            let mut angle = 4.0 / 64.0;
+            let mut angle = 4.0 / SOLVE_STEP as f32;
             let vertical = Vec2::new(dp.y, -dp.x);
             if v0.dot(vertical) < v1.dot(vertical) {
                 angle = -angle;
@@ -216,6 +182,7 @@ impl SnakeHead {
         &self,
         bodies: &mut [SnakeBody],
         max_move: f32,
+        min_move: f32,
         radius: f32,
     ) -> Vec<Vec2> {
         let head_pos = self.position;
@@ -233,14 +200,12 @@ impl SnakeHead {
             .map(|body| {
                 let time = self.time - body.delay;
                 let distance = self.get_distance(time);
-                let (target, target_distance) = self.get_position(distance - body.distance);
-                let remain = target.distance(body.position) - target_distance;
-                let k = ((remain / radius - 1.5) / 2.5).max(0.0).min(1.0);
+                let (target, stop_distance) = self.get_position(distance - body.distance);
+                let current_distance = target.distance(body.position);
+                let remain_distance = (current_distance - stop_distance).max(0.0);
+                let k = ((remain_distance / radius - 1.5) / 2.5).max(0.0).min(1.0);
                 let max_move1 = max_move * (k * 0.5 + 1.5);
-                let mut delta = Self::limit_distance(target, body.position, target_distance) - body.position;
-                if delta.length_squared() > max_move1 * max_move1 {
-                    delta = delta.normalize() * max_move1;
-                }
+                let delta = (target - body.position) * (remain_distance.min(max_move1) / current_distance);
                 BodyMove {
                     position: body.position,
                     delta: delta,
@@ -251,10 +216,9 @@ impl SnakeHead {
             })
             .collect();
 
-        let step = 64;
-        for _ in 0..step {
+        for _ in 0..SOLVE_STEP {
             for bm in body_move.iter_mut() {
-                bm.position += bm.delta / step as f32;
+                bm.position += bm.delta / SOLVE_STEP as f32;
             }
             for i in 0..body_move.len() {
                 if body_move[i].position.distance_squared(head_pos) < rr4 {
@@ -317,7 +281,14 @@ impl SnakeHead {
                 }
             }
             for bm in body_move.iter_mut() {
-                bm.position = Self::limit_distance(bm.origin, bm.position, bm.max_move);
+                let distance = bm.origin.distance(bm.position);
+                if distance >= min_move / SOLVE_STEP as f32 {
+                    if distance > bm.max_move {
+                        bm.position = bm.origin.lerp(bm.position, bm.max_move / distance);
+                    }
+                } else {
+                    bm.position = bm.origin;
+                }
             }
         }
 
