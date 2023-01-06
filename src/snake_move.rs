@@ -1,24 +1,28 @@
+#[cfg(feature = "bevy")]
 use bevy::math::*;
-use serde::{Serialize, Deserialize};
+#[cfg(feature = "glam")]
+use glam::{Mat2, Vec2};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 const SOLVE_STEP: i32 = 8;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Clone, Serialize, Deserialize))]
 struct DistanceRecord {
-    time: f32,
-    distance: f32,
+    time: f64,
+    distance: f64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Clone, Serialize, Deserialize))]
 struct PositionRecord {
-    distance: f32,
+    distance: f64,
     position: Vec2,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "serde", derive(Clone, Serialize, Deserialize))]
 pub struct SnakeHead {
     position: Vec2,
-    time: f32,
+    time: f64,
     dis_rec: Vec<DistanceRecord>,
     pos_rec: Vec<PositionRecord>,
     max_delay: f32,
@@ -56,7 +60,7 @@ impl SnakeHead {
         self.position
     }
 
-    pub fn move_head(&mut self, position: Vec2, dt: f32) {
+    pub fn move_head(&mut self, position: Vec2, dt: f64) {
         self.position = position;
         self.time += dt;
         let n_dis = self.dis_rec.len();
@@ -80,7 +84,7 @@ impl SnakeHead {
             }
             if index < n_pos {
                 let p = &self.pos_rec[index];
-                if p.position.distance(position) + p.distance < last_dis {
+                if p.position.distance(position) as f64 + p.distance < last_dis {
                     self.pos_rec.truncate(index + 1);
                 }
             }
@@ -88,7 +92,7 @@ impl SnakeHead {
             // add record
             let last_pos = self.pos_rec.last().unwrap();
             let delta = last_pos.position.distance(position);
-            let new_dis = last_dis.max(last_pos.distance + delta);
+            let new_dis = last_dis.max(last_pos.distance + delta as f64);
             if n_dis > 1 && new_dis - self.dis_rec[n_dis - 2].distance < 0.0001 {
                 // merge same distance record
                 self.dis_rec[n_dis - 1].time = self.time;
@@ -100,16 +104,17 @@ impl SnakeHead {
             }
             let min_step = 5.0;
             if delta >= min_step {
-                let distance = last_pos.distance + delta;
+                let distance = last_pos.distance + delta as f64;
                 self.pos_rec.push(PositionRecord { distance, position });
             }
             if self.dis_rec.len() > 128
-                && self.dis_rec[128].time + self.max_delay < self.dis_rec.last().unwrap().time
+                && self.dis_rec[128].time + (self.max_delay as f64)
+                    < self.dis_rec.last().unwrap().time
             {
                 self.dis_rec.drain(..128);
             }
             if self.pos_rec.len() > 128
-                && self.pos_rec[128].distance + self.max_distance
+                && self.pos_rec[128].distance + (self.max_distance as f64)
                     < self.pos_rec.last().unwrap().distance
             {
                 self.pos_rec.drain(..128);
@@ -119,7 +124,7 @@ impl SnakeHead {
         }
     }
 
-    pub fn get_distance(&self, time: f32) -> f32 {
+    pub fn get_distance(&self, time: f64) -> f64 {
         let p = match self
             .dis_rec
             .binary_search_by(|d| d.time.partial_cmp(&time).unwrap())
@@ -140,7 +145,7 @@ impl SnakeHead {
         }
     }
 
-    pub fn get_position(&self, distance: f32) -> (Vec2, f32) {
+    pub fn get_position(&self, distance: f64) -> (Vec2, f32) {
         let p = match self
             .pos_rec
             .binary_search_by(|p| p.distance.partial_cmp(&distance).unwrap())
@@ -152,12 +157,12 @@ impl SnakeHead {
             let pos_rec0 = &self.pos_rec[p - 1];
             let pos_rec1 = &self.pos_rec[p];
             let k = (distance - pos_rec0.distance) / (pos_rec1.distance - pos_rec0.distance);
-            (pos_rec0.position.lerp(pos_rec1.position, k), 0.0)
+            (pos_rec0.position.lerp(pos_rec1.position, k as f32), 0.0)
         } else if !self.pos_rec.is_empty() {
             let p1 = p.min(self.pos_rec.len() - 1);
             (
                 self.pos_rec[p1].position,
-                self.pos_rec[p1].distance - distance,
+                (self.pos_rec[p1].distance - distance) as f32,
             )
         } else {
             (Vec2::ZERO, 0.0)
@@ -198,17 +203,18 @@ impl SnakeHead {
         let mut body_move: Vec<_> = bodies
             .iter()
             .map(|body| {
-                let time = self.time - body.delay;
+                let time = self.time - body.delay as f64;
                 let distance = self.get_distance(time);
-                let (target, stop_distance) = self.get_position(distance - body.distance);
+                let (target, stop_distance) = self.get_position(distance - body.distance as f64);
                 let current_distance = target.distance(body.position);
                 let remain_distance = (current_distance - stop_distance).max(0.0);
-                let k = ((remain_distance / radius - 1.5) / 2.5).max(0.0).min(1.0);
+                let k = ((remain_distance / radius - 1.5) / 2.5).clamp(0.0, 1.0);
                 let max_move1 = max_move * (k * 0.5 + 1.5);
-                let delta = (target - body.position) * (remain_distance.min(max_move1) / current_distance);
+                let delta =
+                    (target - body.position) * (remain_distance.min(max_move1) / current_distance);
                 BodyMove {
                     position: body.position,
-                    delta: delta,
+                    delta,
                     origin: body.position,
                     target,
                     max_move: max_move1,
@@ -246,11 +252,18 @@ impl SnakeHead {
             for i in 0..body_move.len() {
                 if body_move[i].position.distance_squared(head_pos) < rr4 * 1.0001 {
                     let bm0 = &body_move[i];
-                    let detour = Self::detour(bm0.position, bm0.delta, bm0.target, head_pos, Vec2::ZERO, head_pos);
-                    if detour.length_squared() > 0.01 {
+                    let detour = Self::detour(
+                        bm0.position,
+                        bm0.delta,
+                        bm0.target,
+                        head_pos,
+                        Vec2::ZERO,
+                        head_pos,
+                    );
+                    if detour.length_squared() > 0.0001 {
                         let pos = bm0.position + 2.0 * detour;
-                        if pos.distance_squared(head_pos) >= rr4
-                            && body_move.iter()
+                        if body_move
+                            .iter()
                             .enumerate()
                             .filter(|(j, _)| *j != i)
                             .all(|(_, bm)| pos.distance_squared(bm.position) >= rr4)
@@ -260,18 +273,34 @@ impl SnakeHead {
                     }
                 }
                 for j in i + 1..body_move.len() {
-                    if body_move[i].position.distance_squared(body_move[j].position) < rr4 {
+                    if body_move[i]
+                        .position
+                        .distance_squared(body_move[j].position)
+                        < rr4
+                    {
                         let bm0 = &body_move[i];
                         let bm1 = &body_move[j];
-                        let detour = Self::detour(bm0.position, bm0.delta, bm0.target, bm1.position, bm1.delta, bm1.target);
+                        let detour = Self::detour(
+                            bm0.position,
+                            bm0.delta,
+                            bm0.target,
+                            bm1.position,
+                            bm1.delta,
+                            bm1.target,
+                        );
                         if detour.length_squared() > 0.0001 {
                             let pos0 = bm0.position + detour;
                             let pos1 = bm1.position - detour;
-                            if pos0.distance_squared(head_pos) >= rr4 && pos1.distance_squared(head_pos) >= rr4
-                                && body_move.iter()
-                                .enumerate()
-                                .filter(|(k, _)| *k != i && *k != j)
-                                .all(|(_, bm)| pos0.distance_squared(bm.position) >= rr4 && pos1.distance_squared(bm.position) >= rr4)
+                            if pos0.distance_squared(head_pos) >= rr4
+                                && pos1.distance_squared(head_pos) >= rr4
+                                && body_move
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(k, _)| *k != i && *k != j)
+                                    .all(|(_, bm)| {
+                                        pos0.distance_squared(bm.position) >= rr4
+                                            && pos1.distance_squared(bm.position) >= rr4
+                                    })
                             {
                                 body_move[i].position = pos0;
                                 body_move[j].position = pos1;
@@ -303,7 +332,8 @@ impl SnakeHead {
     }
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SnakeBody {
     pub delay: f32,
     pub distance: f32,

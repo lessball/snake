@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use bevy::render::camera::RenderTarget;
 use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 
-use serde::{Serialize, Deserialize};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 mod snake_move;
 use snake_move::*;
@@ -71,9 +72,7 @@ fn leader_move(
         let leader_delta = leader_dir * (delta_time * SPEED);
         leader_pos += leader_delta;
         tm.translation = leader_pos.extend(0.0);
-        leader
-            .snake_head
-            .move_head(leader_pos, delta_time);
+        leader.snake_head.move_head(leader_pos, delta_time as f64);
     }
 }
 
@@ -93,10 +92,12 @@ fn follower_move(
         }
         let delta_time = time.delta_seconds();
         // let delta_time = 1.0 / 60.0;
-        let target =
-            leader
-                .snake_head
-                .solve_body(&mut leader.snake_bodys, delta_time * SPEED, delta_time * SPEED * 0.1, RADIUS);
+        let target = leader.snake_head.solve_body(
+            &mut leader.snake_bodys,
+            delta_time * SPEED,
+            delta_time * SPEED * 0.1,
+            RADIUS,
+        );
         let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
         let mut iter_body = leader.snake_bodys.iter();
         while let (Some(mut tm), Some(body)) = (iter_follower_tm.fetch_next(), iter_body.next()) {
@@ -107,7 +108,8 @@ fn follower_move(
             if let Some(mut tm) = iter_target_tm.fetch_next() {
                 tm.translation = ((body.position + target) * 0.5).extend(0.0);
                 if target.distance_squared(body.position) > 0.0001 {
-                    tm.rotation = Quat::from_rotation_arc_2d(Vec2::X, (target - body.position).normalize());
+                    tm.rotation =
+                        Quat::from_rotation_arc_2d(Vec2::X, (target - body.position).normalize());
                     tm.scale = Vec3::new(target.distance(body.position) * 0.5 + 1.0, 1.0, 1.0);
                 } else {
                     tm.rotation = Quat::IDENTITY;
@@ -145,13 +147,14 @@ fn update_path(mut meshes: ResMut<Assets<Mesh>>, query_leader: Query<&Leader>) {
     }
 }
 
-
+#[cfg(feature = "serde")]
 #[derive(Serialize, Deserialize)]
 struct SaveData {
     snake_head: SnakeHead,
     snake_bodys: Vec<SnakeBody>,
 }
 
+#[cfg(feature = "serde")]
 fn save_load(
     keyboard_input: Res<Input<KeyCode>>,
     mut query_leader: Query<(&mut Leader, &mut Transform)>,
@@ -161,7 +164,7 @@ fn save_load(
         let (leader, _) = query_leader.single();
         let data = SaveData {
             snake_head: leader.snake_head.clone(),
-            snake_bodys: leader.snake_bodys.clone()
+            snake_bodys: leader.snake_bodys.clone(),
         };
         let serialized = serde_json::to_string(&data).unwrap();
         std::fs::write("save.json", serialized).unwrap();
@@ -174,7 +177,9 @@ fn save_load(
                 leader_tm.translation = leader.snake_head.head_position().extend(0.0);
                 let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
                 let mut iter_body = leader.snake_bodys.iter();
-                while let (Some(mut tm), Some(body)) = (iter_follower_tm.fetch_next(), iter_body.next()) {
+                while let (Some(mut tm), Some(body)) =
+                    (iter_follower_tm.fetch_next(), iter_body.next())
+                {
                     tm.translation = body.position.extend(0.0);
                 }
             }
@@ -282,8 +287,10 @@ impl Plugin for SnakePlugin {
         app.add_system(leader_move)
             .add_system(follower_move.after(leader_move))
             .add_system(update_path)
-            .add_system(save_load)
             .add_startup_system(setup);
+
+        #[cfg(feature = "serde")]
+        app.add_system(save_load);
     }
 }
 
