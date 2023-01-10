@@ -92,7 +92,7 @@ fn follower_move(
         }
         let delta_time = time.delta_seconds();
         // let delta_time = 1.0 / 60.0;
-        let target = leader.snake_head.solve_body(
+        leader.snake_head.solve_body(
             &mut leader.snake_bodys,
             delta_time * SPEED,
             delta_time * SPEED * 0.1,
@@ -104,13 +104,15 @@ fn follower_move(
             tm.translation = body.position.extend(0.0);
         }
         let mut iter_target_tm = query_tm.iter_many_mut(&leader.targets);
-        for (body, &target) in leader.snake_bodys.iter().zip(target.iter()) {
+        for body in leader.snake_bodys.iter() {
             if let Some(mut tm) = iter_target_tm.fetch_next() {
-                tm.translation = ((body.position + target) * 0.5).extend(0.0);
-                if target.distance_squared(body.position) > 0.0001 {
-                    tm.rotation =
-                        Quat::from_rotation_arc_2d(Vec2::X, (target - body.position).normalize());
-                    tm.scale = Vec3::new(target.distance(body.position) * 0.5 + 1.0, 1.0, 1.0);
+                tm.translation = ((body.position + body.target) * 0.5).extend(0.0);
+                if body.target.distance_squared(body.position) > 0.0001 {
+                    tm.rotation = Quat::from_rotation_arc_2d(
+                        Vec2::X,
+                        (body.target - body.position).normalize(),
+                    );
+                    tm.scale = Vec3::new(body.target.distance(body.position) * 0.5 + 1.0, 1.0, 1.0);
                 } else {
                     tm.rotation = Quat::IDENTITY;
                     tm.scale = Vec3::ONE;

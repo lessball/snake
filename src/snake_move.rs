@@ -183,13 +183,7 @@ impl SnakeHead {
         }
     }
 
-    pub fn solve_body(
-        &self,
-        bodies: &mut [SnakeBody],
-        max_move: f32,
-        min_move: f32,
-        radius: f32,
-    ) -> Vec<Vec2> {
+    pub fn solve_body(&self, bodies: &mut [SnakeBody], max_move: f32, min_move: f32, radius: f32) {
         let head_pos = self.position;
         let rr4 = radius * radius * 4.0;
 
@@ -321,10 +315,10 @@ impl SnakeHead {
             }
         }
 
-        for (body, body_move) in bodies.iter_mut().zip(body_move.iter()) {
-            body.position = body_move.position;
+        for (body, bm) in bodies.iter_mut().zip(body_move.iter()) {
+            body.position = bm.position;
+            body.target = bm.target;
         }
-        body_move.iter().map(|bm| bm.target).collect()
     }
 
     pub fn get_path(&self) -> impl Iterator<Item = Vec2> + '_ {
@@ -338,6 +332,7 @@ pub struct SnakeBody {
     pub delay: f32,
     pub distance: f32,
     pub position: Vec2,
+    pub target: Vec2,
 }
 
 impl SnakeBody {
@@ -346,6 +341,7 @@ impl SnakeBody {
             delay,
             distance,
             position,
+            target: Vec2::ZERO,
         }
     }
 }
