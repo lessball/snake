@@ -222,8 +222,7 @@ impl SnakeHead {
             }
             for i in 0..body_move.len() {
                 if body_move[i].position.distance_squared(head_pos) < rr4 {
-                    let bm0 = &body_move[i];
-                    let v0 = bm0.position - head_pos;
+                    let v0 = body_move[i].position - head_pos;
                     let len = v0.length();
                     if len > 0.0001 {
                         body_move[i].position += v0 * (radius * 2.0 / len - 1.0);
@@ -270,7 +269,7 @@ impl SnakeHead {
                     if body_move[i]
                         .position
                         .distance_squared(body_move[j].position)
-                        < rr4
+                        < rr4 * 1.0001
                     {
                         let bm0 = &body_move[i];
                         let bm1 = &body_move[j];
