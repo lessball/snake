@@ -10,19 +10,13 @@ pub struct Vector2 {
 
 impl From<Vec2> for Vector2 {
     fn from(v: Vec2) -> Self {
-        Self {
-            x: v.x,
-            y: v.y,
-        }
+        Self { x: v.x, y: v.y }
     }
 }
 
 impl From<Vector2> for Vec2 {
     fn from(v: Vector2) -> Self {
-        Self {
-            x: v.x,
-            y: v.y,
-        }
+        Self { x: v.x, y: v.y }
     }
 }
 

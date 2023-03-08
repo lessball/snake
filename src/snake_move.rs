@@ -1,30 +1,108 @@
 #[cfg(feature = "bevy")]
 use bevy::math::*;
+use delegate::delegate;
 #[cfg(feature = "glam")]
 use glam::{Mat2, Vec2};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use std::ops::{Index, IndexMut};
 
 const SOLVE_STEP: i32 = 8;
 
+fn invert_lerp<T: num_traits::Float>(min: T, max: T, k: T) -> T {
+    (k - min) / (max - min)
+}
+
+trait LerpValue {
+    fn lerp(self, other: Self, k: f64) -> Self;
+}
+
+impl LerpValue for f64 {
+    fn lerp(self, other: Self, k: f64) -> Self {
+        self + (other - self) * k
+    }
+}
+
+impl LerpValue for Vec2 {
+    fn lerp(self, other: Self, k: f64) -> Self {
+        Vec2::lerp(self, other, k as f32)
+    }
+}
+
+#[derive(Default)]
 #[cfg_attr(feature = "serde", derive(Clone, Serialize, Deserialize))]
-struct DistanceRecord {
-    time: f64,
-    distance: f64,
+struct MoveRecord<T> {
+    key: f64,
+    value: T,
 }
 
 #[cfg_attr(feature = "serde", derive(Clone, Serialize, Deserialize))]
-struct PositionRecord {
-    distance: f64,
-    position: Vec2,
+struct MoveRecords<T>(Vec<MoveRecord<T>>);
+
+impl<T> Index<usize> for MoveRecords<T> {
+    type Output = MoveRecord<T>;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl<T> IndexMut<usize> for MoveRecords<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
+
+impl<T> MoveRecords<T> {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    delegate! {
+        to self.0 {
+            pub fn len(&self) -> usize;
+            pub fn is_empty(&self) -> bool;
+            pub fn clear(&mut self);
+            pub fn push(&mut self, value: MoveRecord<T>);
+            pub fn last(&self) -> Option<&MoveRecord<T>>;
+            pub fn truncate(&mut self, len: usize);
+            pub fn iter(&self) -> std::slice::Iter<'_, MoveRecord<T>>;
+        }
+    }
+
+    pub fn last_key(&self) -> f64 {
+        self.last().unwrap().key
+    }
+
+    pub fn trim(&mut self, threshold: f64) {
+        if self.len() > 128 && self[128].key + threshold < self.last_key() {
+            self.0.drain(..128);
+        }
+    }
+
+    pub fn get_linear(&self, key: f64) -> (T, f64)
+    where
+        T: LerpValue + Default + Copy,
+    {
+        let p = self.0.partition_point(|rec| rec.key < key);
+        if p > 0 && p < self.len() {
+            let a = &self[p - 1];
+            let b = &self[p];
+            (a.value.lerp(b.value, invert_lerp(a.key, b.key, key)), 0.0)
+        } else if !self.is_empty() {
+            let a = &self[p.min(self.len() - 1)];
+            (a.value, a.key - key)
+        } else {
+            (T::default(), 0.0)
+        }
+    }
 }
 
 #[cfg_attr(feature = "serde", derive(Clone, Serialize, Deserialize))]
 pub struct SnakeHead {
     position: Vec2,
     time: f64,
-    dis_rec: Vec<DistanceRecord>,
-    pos_rec: Vec<PositionRecord>,
+    dis_rec: MoveRecords<f64>,
+    pos_rec: MoveRecords<Vec2>,
     max_delay: f32,
     max_distance: f32,
 }
@@ -34,8 +112,8 @@ impl SnakeHead {
         Self {
             position: Vec2::ZERO,
             time: 0.0,
-            dis_rec: Vec::new(),
-            pos_rec: Vec::new(),
+            dis_rec: MoveRecords::new(),
+            pos_rec: MoveRecords::new(),
             max_delay,
             max_distance,
         }
@@ -46,13 +124,13 @@ impl SnakeHead {
         self.time = 0.0;
         self.dis_rec.clear();
         self.pos_rec.clear();
-        self.dis_rec.push(DistanceRecord {
-            time: 0.0,
-            distance: 0.0,
+        self.dis_rec.push(MoveRecord {
+            key: 0.0,
+            value: 0.0,
         });
-        self.pos_rec.push(PositionRecord {
-            distance: 0.0,
-            position,
+        self.pos_rec.push(MoveRecord {
+            key: 0.0,
+            value: position,
         });
     }
 
@@ -67,16 +145,16 @@ impl SnakeHead {
         let n_pos = self.pos_rec.len();
         if n_dis > 0 && n_pos > 0 {
             // move back, remove position record
-            let last_dis = self.dis_rec[n_dis - 1].distance;
+            let last_dis = self.dis_rec[n_dis - 1].value;
             let max_back = 40.0;
             let mut min_dis = f32::MAX;
             let mut index = usize::MAX;
             for i in (0..n_pos - 1).rev() {
                 let p = &self.pos_rec[i];
-                if p.distance < last_dis - max_back {
+                if p.key < last_dis - max_back {
                     break;
                 }
-                let dis = p.position.distance_squared(position);
+                let dis = p.value.distance_squared(position);
                 if dis < min_dis {
                     min_dis = dis;
                     index = i;
@@ -84,89 +162,45 @@ impl SnakeHead {
             }
             if index < n_pos {
                 let p = &self.pos_rec[index];
-                if p.position.distance(position) as f64 + p.distance < last_dis {
+                if p.value.distance(position) as f64 + p.key < last_dis {
                     self.pos_rec.truncate(index + 1);
                 }
             }
 
             // add record
             let last_pos = self.pos_rec.last().unwrap();
-            let delta = last_pos.position.distance(position);
-            let new_dis = last_dis.max(last_pos.distance + delta as f64);
-            if n_dis > 1 && new_dis - self.dis_rec[n_dis - 2].distance < 0.0001 {
+            let delta = last_pos.value.distance(position);
+            let new_dis = last_dis.max(last_pos.key + delta as f64);
+            if n_dis > 1 && new_dis - self.dis_rec[n_dis - 2].value < 0.0001 {
                 // merge same distance record
-                self.dis_rec[n_dis - 1].time = self.time;
+                self.dis_rec[n_dis - 1].key = self.time;
             } else {
-                self.dis_rec.push(DistanceRecord {
-                    time: self.time,
-                    distance: new_dis,
+                self.dis_rec.push(MoveRecord {
+                    key: self.time,
+                    value: new_dis,
                 });
             }
             let min_step = 5.0;
             if delta >= min_step {
-                let distance = last_pos.distance + delta as f64;
-                self.pos_rec.push(PositionRecord { distance, position });
+                let distance = last_pos.key + delta as f64;
+                self.pos_rec.push(MoveRecord {
+                    key: distance,
+                    value: position,
+                });
             }
-            if self.dis_rec.len() > 128
-                && self.dis_rec[128].time + (self.max_delay as f64)
-                    < self.dis_rec.last().unwrap().time
-            {
-                self.dis_rec.drain(..128);
-            }
-            if self.pos_rec.len() > 128
-                && self.pos_rec[128].distance + (self.max_distance as f64)
-                    < self.pos_rec.last().unwrap().distance
-            {
-                self.pos_rec.drain(..128);
-            }
+            self.dis_rec.trim(self.max_delay as f64);
+            self.pos_rec.trim(self.max_distance as f64);
         } else {
             self.reset(position);
         }
     }
 
     pub fn get_distance(&self, time: f64) -> f64 {
-        let p = match self
-            .dis_rec
-            .binary_search_by(|d| d.time.partial_cmp(&time).unwrap())
-        {
-            Ok(p) => p,
-            Err(p) => p,
-        };
-        if p > 0 && p < self.dis_rec.len() {
-            let dis_rec0 = &self.dis_rec[p - 1];
-            let dis_rec1 = &self.dis_rec[p];
-            let k = (time - dis_rec0.time) / (dis_rec1.time - dis_rec0.time);
-            k * (dis_rec1.distance - dis_rec0.distance) + dis_rec0.distance
-        } else if !self.dis_rec.is_empty() {
-            let p1 = p.min(self.dis_rec.len() - 1);
-            self.dis_rec[p1].distance
-        } else {
-            0.0
-        }
+        self.dis_rec.get_linear(time).0
     }
 
-    pub fn get_position(&self, distance: f64) -> (Vec2, f32) {
-        let p = match self
-            .pos_rec
-            .binary_search_by(|p| p.distance.partial_cmp(&distance).unwrap())
-        {
-            Ok(p) => p,
-            Err(p) => p,
-        };
-        if p > 0 && p < self.pos_rec.len() {
-            let pos_rec0 = &self.pos_rec[p - 1];
-            let pos_rec1 = &self.pos_rec[p];
-            let k = (distance - pos_rec0.distance) / (pos_rec1.distance - pos_rec0.distance);
-            (pos_rec0.position.lerp(pos_rec1.position, k as f32), 0.0)
-        } else if !self.pos_rec.is_empty() {
-            let p1 = p.min(self.pos_rec.len() - 1);
-            (
-                self.pos_rec[p1].position,
-                (self.pos_rec[p1].distance - distance) as f32,
-            )
-        } else {
-            (Vec2::ZERO, 0.0)
-        }
+    pub fn get_position(&self, distance: f64) -> (Vec2, f64) {
+        self.pos_rec.get_linear(distance)
     }
 
     pub fn detour(p0: Vec2, v0: Vec2, t0: Vec2, p1: Vec2, v1: Vec2, t1: Vec2) -> Vec2 {
@@ -201,8 +235,8 @@ impl SnakeHead {
                 let distance = self.get_distance(time);
                 let (target, stop_distance) = self.get_position(distance - body.distance as f64);
                 let current_distance = target.distance(body.position);
-                let remain_distance = (current_distance - stop_distance).max(0.0);
-                let k = ((remain_distance / radius - 1.5) / 2.5).clamp(0.0, 1.0);
+                let remain_distance = (current_distance - stop_distance as f32).max(0.0);
+                let k = invert_lerp(1.5, 4.0, remain_distance / radius).clamp(0.0, 1.0);
                 let max_move1 = max_move * (k * 0.5 + 1.5);
                 let delta =
                     (target - body.position) * (remain_distance.min(max_move1) / current_distance);
@@ -321,7 +355,7 @@ impl SnakeHead {
     }
 
     pub fn get_path(&self) -> impl Iterator<Item = Vec2> + '_ {
-        self.pos_rec.iter().map(|r| r.position)
+        self.pos_rec.iter().map(|r| r.value)
     }
 }
 
