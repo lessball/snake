@@ -69,12 +69,8 @@ impl<T> MoveRecords<T> {
         }
     }
 
-    pub fn last_key(&self) -> f64 {
-        self.last().unwrap().key
-    }
-
     pub fn trim(&mut self, threshold: f64) {
-        if self.len() > 128 && self[128].key + threshold < self.last_key() {
+        if self.len() > 128 && self[128].key + threshold < self.last().unwrap().key {
             self.0.drain(..128);
         }
     }
@@ -217,6 +213,14 @@ impl SnakeHead {
         }
     }
 
+    fn foreach_pair<F: FnMut(usize, usize)>(len: usize, mut f: F) {
+        for i in 0..len - 1 {
+            for j in i + 1..len {
+                f(i, j);
+            }
+        }
+    }
+
     pub fn solve_body(&self, bodies: &mut [SnakeBody], max_move: f32, min_move: f32, radius: f32) {
         let head_pos = self.position;
         let rr4 = radius * radius * 4.0;
@@ -228,115 +232,94 @@ impl SnakeHead {
             target: Vec2,
             max_move: f32,
         }
-        let mut body_move: Vec<_> = bodies
-            .iter()
-            .map(|body| {
-                let time = self.time - body.delay as f64;
-                let distance = self.get_distance(time);
-                let (target, stop_distance) = self.get_position(distance - body.distance as f64);
-                let current_distance = target.distance(body.position);
-                let remain_distance = (current_distance - stop_distance as f32).max(0.0);
-                let k = invert_lerp(1.5, 4.0, remain_distance / radius).clamp(0.0, 1.0);
-                let max_move1 = max_move * (k * 0.5 + 1.5);
-                let delta =
-                    (target - body.position) * (remain_distance.min(max_move1) / current_distance);
-                BodyMove {
-                    position: body.position,
-                    delta,
-                    origin: body.position,
-                    target,
-                    max_move: max_move1,
-                }
-            })
-            .collect();
+        let mut body_move: Vec<BodyMove> = Vec::with_capacity(bodies.len() + 1);
+        body_move.push(BodyMove {
+            position: head_pos,
+            delta: Vec2::ZERO,
+            origin: head_pos,
+            target: head_pos,
+            max_move: 0.0,
+        });
+        for body in bodies.iter() {
+            let time = self.time - body.delay as f64;
+            let distance = self.get_distance(time);
+            let (target, stop_distance) = self.get_position(distance - body.distance as f64);
+            let current_distance = target.distance(body.position);
+            let remain_distance = (current_distance - stop_distance as f32).max(0.0);
+            let k = invert_lerp(1.5, 4.0, remain_distance / radius).clamp(0.0, 1.0);
+            let max_move1 = max_move * (1.5 + k * 0.5);
+            let delta =
+                (target - body.position) * (remain_distance.min(max_move1) / current_distance);
+            body_move.push(BodyMove {
+                position: body.position,
+                delta,
+                origin: body.position,
+                target,
+                max_move: max_move1,
+            });
+        }
 
         for _ in 0..SOLVE_STEP {
-            for bm in body_move.iter_mut() {
+            for bm in body_move.iter_mut().skip(1) {
                 bm.position += bm.delta / SOLVE_STEP as f32;
             }
-            for i in 0..body_move.len() {
-                if body_move[i].position.distance_squared(head_pos) < rr4 {
-                    let v0 = body_move[i].position - head_pos;
-                    let len = v0.length();
-                    if len > 0.0001 {
-                        body_move[i].position += v0 * (radius * 2.0 / len - 1.0);
+            Self::foreach_pair(body_move.len(), |i, j| {
+                let bm0 = &body_move[i];
+                let bm1 = &body_move[j];
+                if bm0.position.distance_squared(bm1.position) >= rr4 {
+                    return;
+                }
+                let v0 = bm1.position - bm0.position;
+                let len = v0.length();
+                if len > 0.0001 {
+                    let d = v0 * (radius / len - 0.5);
+                    if i > 0 {
+                        body_move[i].position -= d;
+                        body_move[j].position += d;
+                    } else {
+                        body_move[j].position += d * 2.0;
                     }
                 }
-                for j in i + 1..body_move.len() {
-                    let bm0 = &body_move[i];
-                    let bm1 = &body_move[j];
-                    if bm0.position.distance_squared(bm1.position) < rr4 {
-                        let v0 = bm1.position - bm0.position;
-                        let len = v0.length();
-                        if len > 0.0001 {
-                            let d = v0 * (radius / len - 0.5);
-                            body_move[i].position -= d;
-                            body_move[j].position += d;
+            });
+            Self::foreach_pair(body_move.len(), |i, j| {
+                let bm0 = &body_move[i];
+                let bm1 = &body_move[j];
+                if bm0.position.distance_squared(body_move[j].position) >= rr4 * 1.0001 {
+                    return;
+                }
+                let dp = bm1.position - bm0.position;
+                if dp.dot(bm1.target - bm0.target) >= -0.001 {
+                    return;
+                }
+                let vertical = Vec2::new(dp.y, -dp.x);
+                let mut angle = 4.0 / SOLVE_STEP as f32;
+                if bm0.delta.dot(vertical) < bm1.delta.dot(vertical) {
+                    angle = -angle;
+                }
+                let offset = Mat2::from_angle(angle).mul_vec2(dp) - dp;
+                let check_move = |pos: Vec2| {
+                    for (k, bm) in body_move.iter().enumerate() {
+                        if k != i && k != j && pos.distance_squared(bm.position) < rr4 {
+                            return false;
                         }
                     }
-                }
-            }
-            for i in 0..body_move.len() {
-                if body_move[i].position.distance_squared(head_pos) < rr4 * 1.0001 {
-                    let bm0 = &body_move[i];
-                    let detour = Self::detour(
-                        bm0.position,
-                        bm0.delta,
-                        bm0.target,
-                        head_pos,
-                        Vec2::ZERO,
-                        head_pos,
-                    );
-                    if detour.length_squared() > 0.0001 {
-                        let pos = bm0.position + 2.0 * detour;
-                        if body_move
-                            .iter()
-                            .enumerate()
-                            .filter(|(j, _)| *j != i)
-                            .all(|(_, bm)| pos.distance_squared(bm.position) >= rr4)
-                        {
-                            body_move[i].position = pos;
-                        }
+                    true
+                };
+                if i > 0 {
+                    let pos0 = bm0.position - offset;
+                    let pos1 = bm1.position + offset;
+                    if check_move(pos0) && check_move(pos1) {
+                        body_move[i].position = pos0;
+                        body_move[j].position = pos1;
+                    }
+                } else {
+                    let pos = bm1.position + 2.0 * offset;
+                    if check_move(pos) {
+                        body_move[j].position = pos;
                     }
                 }
-                for j in i + 1..body_move.len() {
-                    if body_move[i]
-                        .position
-                        .distance_squared(body_move[j].position)
-                        < rr4 * 1.0001
-                    {
-                        let bm0 = &body_move[i];
-                        let bm1 = &body_move[j];
-                        let detour = Self::detour(
-                            bm0.position,
-                            bm0.delta,
-                            bm0.target,
-                            bm1.position,
-                            bm1.delta,
-                            bm1.target,
-                        );
-                        if detour.length_squared() > 0.0001 {
-                            let pos0 = bm0.position + detour;
-                            let pos1 = bm1.position - detour;
-                            if pos0.distance_squared(head_pos) >= rr4
-                                && pos1.distance_squared(head_pos) >= rr4
-                                && body_move
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(k, _)| *k != i && *k != j)
-                                    .all(|(_, bm)| {
-                                        pos0.distance_squared(bm.position) >= rr4
-                                            && pos1.distance_squared(bm.position) >= rr4
-                                    })
-                            {
-                                body_move[i].position = pos0;
-                                body_move[j].position = pos1;
-                            }
-                        }
-                    }
-                }
-            }
-            for bm in body_move.iter_mut() {
+            });
+            for bm in body_move.iter_mut().skip(1) {
                 let distance = bm.origin.distance(bm.position);
                 if distance >= min_move / SOLVE_STEP as f32 {
                     if distance > bm.max_move {
@@ -348,7 +331,7 @@ impl SnakeHead {
             }
         }
 
-        for (body, bm) in bodies.iter_mut().zip(body_move.iter()) {
+        for (body, bm) in bodies.iter_mut().zip(body_move.iter().skip(1)) {
             body.position = bm.position;
             body.target = bm.target;
         }
