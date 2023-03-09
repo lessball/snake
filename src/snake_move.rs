@@ -199,20 +199,6 @@ impl SnakeHead {
         self.pos_rec.get_linear(distance)
     }
 
-    pub fn detour(p0: Vec2, v0: Vec2, t0: Vec2, p1: Vec2, v1: Vec2, t1: Vec2) -> Vec2 {
-        let dp = p1 - p0;
-        if dp.dot(t1 - t0) < -0.001 {
-            let mut angle = 4.0 / SOLVE_STEP as f32;
-            let vertical = Vec2::new(dp.y, -dp.x);
-            if v0.dot(vertical) < v1.dot(vertical) {
-                angle = -angle;
-            }
-            dp - Mat2::from_angle(angle).mul_vec2(dp)
-        } else {
-            Vec2::ZERO
-        }
-    }
-
     fn foreach_pair<F: FnMut(usize, usize)>(len: usize, mut f: F) {
         for i in 0..len - 1 {
             for j in i + 1..len {
