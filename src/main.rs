@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use bevy::render::camera::RenderTarget;
 use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 
 #[cfg(feature = "serde")]
@@ -29,7 +28,7 @@ struct Leader {
 
 fn leader_move(
     time: Res<Time>,
-    windows: Res<Windows>,
+    window: Query<&Window>,
     camera: Query<(&Camera, &GlobalTransform)>,
     keyboard_input: Res<Input<KeyCode>>,
     mousebutton_input: Res<Input<MouseButton>>,
@@ -43,10 +42,7 @@ fn leader_move(
     .normalize_or_zero();
     let cursor_pos = if mousebutton_input.pressed(MouseButton::Left) {
         let (camera, camera_transform) = camera.single();
-        let wnd = match camera.target {
-            RenderTarget::Window(id) => windows.get(id).unwrap(),
-            _ => windows.get_primary().unwrap(),
-        };
+        let wnd = window.single();
         wnd.cursor_position().and_then(|pos| {
             camera
                 .viewport_to_world(camera_transform, pos)
@@ -199,7 +195,9 @@ fn setup(
     assets: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    mut clear_color: ResMut<ClearColor>,
 ) {
+    clear_color.0 = Color::BLACK;
     let mut path_mesh = Mesh::new(PrimitiveTopology::TriangleList);
     path_mesh.set_indices(Some(Indices::U32(Vec::new())));
     path_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new());
@@ -298,7 +296,6 @@ impl Plugin for SnakePlugin {
 
 fn main() {
     App::new()
-        .insert_resource(ClearColor(Color::BLACK))
         .add_plugins(DefaultPlugins)
         .add_plugin(SnakePlugin)
         // .add_plugin(TestPlugin)
