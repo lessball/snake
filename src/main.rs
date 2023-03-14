@@ -18,6 +18,9 @@ const DISTANCE: f32 = 80.0;
 const SPEED: f32 = 300.0;
 
 #[derive(Component)]
+struct Portal(Vec2);
+
+#[derive(Component)]
 struct Leader {
     snake_head: SnakeHead,
     snake_bodys: Vec<SnakeBody>,
@@ -33,6 +36,7 @@ fn leader_move(
     keyboard_input: Res<Input<KeyCode>>,
     mousebutton_input: Res<Input<MouseButton>>,
     mut query_leader: Query<(&mut Leader, &mut Transform)>,
+    portal: Query<(&Portal, &Transform), (With<Portal>, Without<Leader>)>,
 ) {
     let input_dir = IVec2::new(
         keyboard_input.pressed(KeyCode::D) as i32 - keyboard_input.pressed(KeyCode::A) as i32,
@@ -53,22 +57,31 @@ fn leader_move(
     };
     for (mut leader, mut tm) in query_leader.iter_mut() {
         let mut leader_pos = tm.translation.truncate();
-        let leader_dir = cursor_pos
-            .map(|p| {
-                let t = p - leader_pos;
-                if t.length_squared() > 1.0 {
-                    t.normalize()
-                } else {
-                    Vec2::ZERO
-                }
-            })
-            .unwrap_or(input_dir);
         let delta_time = time.delta_seconds();
-        // let delta_time = 1.0 / 60.0;
-        let leader_delta = leader_dir * (delta_time * SPEED);
-        leader_pos += leader_delta;
+        let pt = portal.single();
+        if pt.1.translation.truncate().distance_squared(leader_pos) < RADIUS * RADIUS {
+            leader_pos = pt.0 .0;
+            leader
+                .snake_head
+                .move_head(delta_time as f64, leader_pos, MoveMode::Teleport);
+        } else {
+            let leader_dir = cursor_pos
+                .map(|p| {
+                    let t = p - leader_pos;
+                    if t.length_squared() > 1.0 {
+                        t.normalize()
+                    } else {
+                        Vec2::ZERO
+                    }
+                })
+                .unwrap_or(input_dir);
+            let leader_delta = leader_dir * (delta_time * SPEED);
+            leader_pos += leader_delta;
+            leader
+                .snake_head
+                .move_head(delta_time as f64, leader_pos, MoveMode::Normal);
+        }
         tm.translation = leader_pos.extend(0.0);
-        leader.snake_head.move_head(leader_pos, delta_time as f64);
     }
 }
 
@@ -255,14 +268,13 @@ fn setup(
                 .id()
         })
         .collect();
-    let mut snake_head = SnakeHead::new(
+    let snake_head = SnakeHead::new(
         snake_bodys.last().unwrap().delay * 2.0,
         snake_bodys.last().unwrap().distance * 2.0,
     );
-    snake_head.reset(Vec2::ZERO);
     commands.spawn((
         SpriteBundle {
-            texture: sprite_handle,
+            texture: sprite_handle.clone(),
             sprite: Sprite {
                 color: color(0),
                 ..Default::default()
@@ -276,6 +288,18 @@ fn setup(
             targets,
             path_mesh,
         },
+    ));
+    commands.spawn((
+        SpriteBundle {
+            transform: Transform::from_translation(Vec3::new(0.0, 200.0, 0.0)),
+            texture: sprite_handle,
+            sprite: Sprite {
+                color: Color::GRAY,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        Portal(Vec2::new(0.0, -200.0)),
     ));
     commands.spawn(Camera2dBundle::default());
 }
