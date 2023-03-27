@@ -1,10 +1,8 @@
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-mod snake_move;
 use snake_move::*;
 
 mod line_poly;
@@ -158,14 +156,12 @@ fn update_path(mut meshes: ResMut<Assets<Mesh>>, query_leader: Query<&Leader>) {
     }
 }
 
-#[cfg(feature = "serde")]
 #[derive(Serialize, Deserialize)]
 struct SaveData {
     snake_head: SnakeHead,
     snake_bodys: Vec<SnakeBody>,
 }
 
-#[cfg(feature = "serde")]
 fn save_load(
     keyboard_input: Res<Input<KeyCode>>,
     mut query_leader: Query<(&mut Leader, &mut Transform)>,
@@ -311,10 +307,8 @@ impl Plugin for SnakePlugin {
         app.add_system(leader_move)
             .add_system(follower_move.after(leader_move))
             .add_system(update_path)
+            .add_system(save_load)
             .add_startup_system(setup);
-
-        #[cfg(feature = "serde")]
-        app.add_system(save_load);
     }
 }
 

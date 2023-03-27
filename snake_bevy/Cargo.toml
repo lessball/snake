@@ -1,0 +1,12 @@
+[package]
+name = "snake_bevy"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+snake_move = { path = "../snake_move", features = ["serde", "serde_json"] }
+bevy = { version = "0.10", default_features = false, features = ["bevy_asset", "bevy_winit", "bevy_core_pipeline", "bevy_render", "bevy_sprite", "png", "x11"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }

@@ -1,7 +1,4 @@
-#[cfg(feature = "bevy")]
-use bevy::math::*;
 use delegate::delegate;
-#[cfg(feature = "glam")]
 use glam::{Mat2, Vec2};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
