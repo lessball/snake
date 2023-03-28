@@ -147,8 +147,11 @@ impl SnakeHead {
         self.position = position;
         self.time += dt;
         if !self.dis_rec.is_empty() {
-            // move mode change, add new segment
-            if move_mode != self.segments.last().unwrap().move_mode {
+            let new_seg = match move_mode {
+                MoveMode::Normal => move_mode != self.segments.last().unwrap().move_mode,
+                MoveMode::Teleport => true,
+            };
+            if new_seg {
                 let rec = self.segments.last().unwrap().pos_rec.last().unwrap();
                 self.segments
                     .push(MoveSegment::new(rec.value, rec.key, move_mode));
@@ -257,38 +260,66 @@ impl SnakeHead {
             target: head_pos,
             max_move: 0.0,
         });
-        for body in bodies.iter_mut() {
-            let time = self.time - body.delay as f64;
-            let mut distance = self.dis_rec.get_linear(time).unwrap().0 - body.distance as f64;
-            let mut iseg = body.segment.saturating_sub(self.segment_first);
-            if distance >= self.segments[iseg].pos_rec.last().unwrap().key
-                && iseg + 1 < self.segments.len()
-                && self.segments[iseg + 1].move_mode == MoveMode::Teleport
-            {
-                iseg += 1;
-                body.segment += 1;
-                body.move_mode = MoveMode::Teleport;
+        for i in 0..bodies.len() {
+            let time = self.time - bodies[i].delay as f64;
+            let distance = self.dis_rec.get_linear(time).unwrap().0 - bodies[i].distance as f64;
+            let iseg = bodies[i].segment.saturating_sub(self.segment_first);
+            if iseg + 1 < self.segments.len() {
+                let can_leave = match self.segments[iseg].move_mode {
+                    MoveMode::Normal => {
+                        distance >= self.segments[iseg].pos_rec.last().unwrap().key
+                    },
+                    MoveMode::Teleport => true,
+                };
+                if can_leave {
+                    match self.segments[iseg + 1].move_mode {
+                        MoveMode::Normal => {
+                            bodies[i].segment += 1;
+                        },
+                        MoveMode::Teleport => {
+                            let pos = self.segments[iseg + 1].pos_rec.last().unwrap().value;
+                            if pos.distance_squared(head_pos) >= rr4
+                                && bodies[..i].iter().all(|body| pos.distance_squared(body.position) >= rr4) {
+                                bodies[i].position = pos;
+                                bodies[i].segment += 1;
+                            }
+                        },
+                    };
+                }
             }
-            if body.move_mode == MoveMode::Teleport {
-                distance = distance.min(self.segments[iseg].pos_rec[0].key);
+            let body = &bodies[i];
+            match self.segments[iseg].move_mode {
+                MoveMode::Normal => {
+                    let time = self.time - body.delay as f64;
+                    let distance = self.dis_rec.get_linear(time).unwrap().0 - body.distance as f64;
+                    let (target, remain) = self.segments[iseg].pos_rec.get_linear(distance).unwrap();
+                    let current_distance = target.distance(body.position);
+                    let expect_distance = (current_distance - remain.max(0.0) as f32).max(0.0);
+                    let k = invert_lerp(1.5, 4.0, expect_distance / radius).clamp(0.0, 1.0);
+                    let max_move1 = max_move * (1.5 + k * 0.5);
+                    let delta = if current_distance > 0.0001 {
+                        (target - body.position) * (expect_distance.min(max_move1) / current_distance)
+                    } else {
+                        Vec2::ZERO
+                    };
+                    body_move.push(BodyMove {
+                        position: body.position,
+                        delta,
+                        origin: body.position,
+                        target,
+                        max_move: max_move1,
+                    });
+                },
+                MoveMode::Teleport => {
+                    body_move.push(BodyMove {
+                        position: body.position,
+                        delta: Vec2::ZERO,
+                        origin: body.position,
+                        target: body.position,
+                        max_move,
+                    });
+                }
             }
-            let (target, remain) = self.segments[iseg].pos_rec.get_linear(distance).unwrap();
-            let current_distance = target.distance(body.position);
-            let expect_distance = (current_distance - remain.max(0.0) as f32).max(0.0);
-            let k = invert_lerp(1.5, 4.0, expect_distance / radius).clamp(0.0, 1.0);
-            let max_move1 = max_move * (1.5 + k * 0.5);
-            let delta = if current_distance > 0.0001 {
-                (target - body.position) * (expect_distance.min(max_move1) / current_distance)
-            } else {
-                Vec2::ZERO
-            };
-            body_move.push(BodyMove {
-                position: body.position,
-                delta,
-                origin: body.position,
-                target,
-                max_move: max_move1,
-            });
         }
 
         for _ in 0..SOLVE_STEP {
@@ -371,19 +402,6 @@ impl SnakeHead {
             body.target = bm.target;
         }
 
-        for i in 0..bodies.len() {
-            if bodies[i].move_mode == MoveMode::Teleport {
-                let iseg = bodies[i].segment.saturating_sub(self.segment_first);
-                if iseg + 1 < self.segments.len() {
-                    let pos = self.segments[iseg].pos_rec.last().unwrap().value;
-                    if pos.distance_squared(head_pos) >= rr4 {
-                        bodies[i].position = pos;
-                        bodies[i].segment += 1;
-                        bodies[i].move_mode = self.segments[iseg + 1].move_mode;
-                    }
-                }
-            }
-        }
         let seg_min = bodies.iter().map(|body| body.segment).min().unwrap();
         if seg_min > self.segment_first {
             self.segments.drain(0..seg_min - self.segment_first);
@@ -406,7 +424,6 @@ pub struct SnakeBody {
     pub position: Vec2,
     pub target: Vec2,
     pub segment: usize,
-    pub move_mode: MoveMode,
 }
 
 impl SnakeBody {
@@ -417,7 +434,6 @@ impl SnakeBody {
             position,
             target: Vec2::ZERO,
             segment: 0,
-            move_mode: MoveMode::Normal,
         }
     }
 }

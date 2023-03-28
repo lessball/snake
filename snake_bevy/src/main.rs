@@ -56,9 +56,15 @@ fn leader_move(
     for (mut leader, mut tm) in query_leader.iter_mut() {
         let mut leader_pos = tm.translation.truncate();
         let delta_time = time.delta_seconds();
-        let pt = portal.single();
-        if pt.1.translation.truncate().distance_squared(leader_pos) < RADIUS * RADIUS {
-            leader_pos = pt.0 .0;
+        let mut teleport = false;
+        for pt in portal.iter() {
+            if pt.1.translation.truncate().distance_squared(leader_pos) < RADIUS * RADIUS {
+                leader_pos = pt.0.0;
+                teleport = true;
+                break;
+            }
+        }
+        if teleport {
             leader
                 .snake_head
                 .move_head(delta_time as f64, leader_pos, MoveMode::Teleport);
@@ -285,18 +291,39 @@ fn setup(
             path_mesh,
         },
     ));
-    commands.spawn((
-        SpriteBundle {
-            transform: Transform::from_translation(Vec3::new(0.0, 200.0, 0.0)),
-            texture: sprite_handle,
-            sprite: Sprite {
-                color: Color::GRAY,
+    let sprite_circle = assets.load("circle.png");
+    let sprite_cross = assets.load("cross.png");
+    let portals = [
+        (0.0, 200.0, 0.0, -200.0),
+        (150.0, 180.0, -150.0, -180.0),
+        (0.0, -210.0, 200.0, 0.0),
+    ];
+    for (i,p) in portals.iter().enumerate() {
+        let color = Color::hsla(i as f32 * 49.0 + 180.0, 1.0, 0.4, 0.4);
+        commands.spawn((
+            SpriteBundle {
+                transform: Transform::from_translation(Vec3::new(p.0, p.1, -0.01)),
+                texture: sprite_circle.clone(),
+                sprite: Sprite {
+                    color: color,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
-            ..Default::default()
-        },
-        Portal(Vec2::new(0.0, -200.0)),
-    ));
+            Portal(Vec2::new(p.2, p.3)),
+        ));
+        commands.spawn(
+            SpriteBundle {
+                transform: Transform::from_translation(Vec3::new(p.2, p.3, -0.01)),
+                texture: sprite_cross.clone(),
+                sprite: Sprite {
+                    color: color,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+    }
     commands.spawn(Camera2dBundle::default());
 }
 
