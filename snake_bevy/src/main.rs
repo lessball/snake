@@ -57,9 +57,9 @@ fn leader_move(
         let mut leader_pos = tm.translation.truncate();
         let delta_time = time.delta_seconds();
         let mut teleport = false;
-        for pt in portal.iter() {
-            if pt.1.translation.truncate().distance_squared(leader_pos) < RADIUS * RADIUS {
-                leader_pos = pt.0.0;
+        for (pt, tm) in portal.iter() {
+            if tm.translation.truncate().distance_squared(leader_pos) < RADIUS * RADIUS {
+                leader_pos = pt.0;
                 teleport = true;
                 break;
             }
@@ -298,7 +298,7 @@ fn setup(
         (150.0, 180.0, -150.0, -180.0),
         (0.0, -210.0, 200.0, 0.0),
     ];
-    for (i,p) in portals.iter().enumerate() {
+    for (i, p) in portals.iter().enumerate() {
         let color = Color::hsla(i as f32 * 49.0 + 180.0, 1.0, 0.4, 0.4);
         commands.spawn((
             SpriteBundle {
@@ -312,17 +312,15 @@ fn setup(
             },
             Portal(Vec2::new(p.2, p.3)),
         ));
-        commands.spawn(
-            SpriteBundle {
-                transform: Transform::from_translation(Vec3::new(p.2, p.3, -0.01)),
-                texture: sprite_cross.clone(),
-                sprite: Sprite {
-                    color: color,
-                    ..Default::default()
-                },
+        commands.spawn(SpriteBundle {
+            transform: Transform::from_translation(Vec3::new(p.2, p.3, -0.01)),
+            texture: sprite_cross.clone(),
+            sprite: Sprite {
+                color: color,
                 ..Default::default()
             },
-        );
+            ..Default::default()
+        });
     }
     commands.spawn(Camera2dBundle::default());
 }
