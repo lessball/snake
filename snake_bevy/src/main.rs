@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
+use bevy::pbr::NotShadowCaster;
 
 use serde::{Deserialize, Serialize};
 
@@ -11,12 +12,20 @@ use line_poly::LinePoly;
 // mod test_plugin;
 // use test_plugin::TestPlugin;
 
+fn to_snake(v: Vec3) -> Vec3 {
+    Vec3::new(v.x, -v.z, v.y)
+}
+
+fn from_snake(v: Vec3) -> Vec3 {
+    Vec3::new(v.x, v.z, -v.y)
+}
+
 const RADIUS: f32 = 30.0;
 const DISTANCE: f32 = 80.0;
 const SPEED: f32 = 300.0;
 
 #[derive(Component)]
-struct Portal(Vec2);
+struct Portal(Vec3);
 
 #[derive(Component)]
 struct Leader {
@@ -36,11 +45,11 @@ fn leader_move(
     mut query_leader: Query<(&mut Leader, &mut Transform)>,
     portal: Query<(&Portal, &Transform), (With<Portal>, Without<Leader>)>,
 ) {
-    let input_dir = IVec2::new(
-        keyboard_input.pressed(KeyCode::D) as i32 - keyboard_input.pressed(KeyCode::A) as i32,
-        keyboard_input.pressed(KeyCode::W) as i32 - keyboard_input.pressed(KeyCode::S) as i32,
+    let input_dir = Vec3::new(
+        keyboard_input.pressed(KeyCode::D) as i32 as f32 - keyboard_input.pressed(KeyCode::A) as i32 as f32,
+        0.0,
+        keyboard_input.pressed(KeyCode::S) as i32 as f32 - keyboard_input.pressed(KeyCode::W) as i32 as f32,
     )
-    .as_vec2()
     .normalize_or_zero();
     let cursor_pos = if mousebutton_input.pressed(MouseButton::Left) {
         let (camera, camera_transform) = camera.single();
@@ -48,17 +57,17 @@ fn leader_move(
         wnd.cursor_position().and_then(|pos| {
             camera
                 .viewport_to_world(camera_transform, pos)
-                .map(|ray| ray.origin.truncate())
+                .map(|ray| ray.origin - ray.direction * (ray.origin.y / ray.direction.y))
         })
     } else {
         None
     };
     for (mut leader, mut tm) in query_leader.iter_mut() {
-        let mut leader_pos = tm.translation.truncate();
+        let mut leader_pos = tm.translation;
         let delta_time = time.delta_seconds();
         let mut teleport = false;
         for (pt, tm) in portal.iter() {
-            if tm.translation.truncate().distance_squared(leader_pos) < RADIUS * RADIUS {
+            if tm.translation.distance_squared(leader_pos) < RADIUS * RADIUS {
                 leader_pos = pt.0;
                 teleport = true;
                 break;
@@ -67,25 +76,25 @@ fn leader_move(
         if teleport {
             leader
                 .snake_head
-                .move_head(delta_time as f64, leader_pos, MoveMode::Teleport);
+                .move_head(delta_time as f64, to_snake(leader_pos), MoveMode::Teleport);
         } else {
-            let leader_dir = cursor_pos
-                .map(|p| {
-                    let t = p - leader_pos;
-                    if t.length_squared() > 1.0 {
-                        t.normalize()
-                    } else {
-                        Vec2::ZERO
-                    }
-                })
-                .unwrap_or(input_dir);
-            let leader_delta = leader_dir * (delta_time * SPEED);
+            let max_distance = delta_time * SPEED;
+            let leader_delta = if let Some(p) = cursor_pos {
+                let mut v = p - leader_pos;
+                let len = v.length();
+                if len > max_distance {
+                    v *= max_distance / len;
+                }
+                v
+            } else {
+                input_dir * max_distance
+            };
             leader_pos += leader_delta;
             leader
                 .snake_head
-                .move_head(delta_time as f64, leader_pos, MoveMode::Normal);
+                .move_head(delta_time as f64, to_snake(leader_pos), MoveMode::Normal);
         }
-        tm.translation = leader_pos.extend(0.0);
+        tm.translation = leader_pos;
     }
 }
 
@@ -101,7 +110,7 @@ fn follower_move(
             .iter_mut()
             .zip(query_tm.iter_many(&leader.followers))
         {
-            body.position = tm.translation.truncate();
+            body.position = to_snake(tm.translation);
         }
         let delta_time = time.delta_seconds();
         // let delta_time = 1.0 / 60.0;
@@ -114,22 +123,21 @@ fn follower_move(
         let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
         let mut iter_body = leader.snake_bodys.iter();
         while let (Some(mut tm), Some(body)) = (iter_follower_tm.fetch_next(), iter_body.next()) {
-            tm.translation = body.position.extend(0.0);
+            tm.translation = from_snake(body.position);
         }
         let mut iter_target_tm = query_tm.iter_many_mut(&leader.targets);
         for body in leader.snake_bodys.iter() {
             if let Some(mut tm) = iter_target_tm.fetch_next() {
-                tm.translation = ((body.position + body.target) * 0.5).extend(0.0);
-                if body.target.distance_squared(body.position) > 0.0001 {
-                    tm.rotation = Quat::from_rotation_arc_2d(
-                        Vec2::X,
-                        (body.target - body.position).normalize(),
-                    );
-                    tm.scale = Vec3::new(body.target.distance(body.position) * 0.5 + 1.0, 1.0, 1.0);
+                tm.translation = from_snake((body.position + body.target) * 0.5);
+                if body.target.distance_squared(body.position) > 1.0 {
+                    *tm = tm
+                        .looking_at(from_snake(body.target), Vec3::Y)
+                        .with_scale(Vec3::new(2.0, 1.0, body.target.distance(body.position) * 0.5 + 1.0));
                 } else {
                     tm.rotation = Quat::IDENTITY;
                     tm.scale = Vec3::ONE;
                 }
+                tm.translation += Vec3::new(0.0, RADIUS, 0.0);
             }
         }
     }
@@ -143,7 +151,7 @@ fn update_path(mut meshes: ResMut<Assets<Mesh>>, query_leader: Query<&Leader>) {
                 m.attribute_mut(Mesh::ATTRIBUTE_POSITION.id)
             {
                 pos.clear();
-                pos.extend(poly.vertices.iter().map(|v| [v.x, v.y, 0.0]));
+                pos.extend(poly.vertices.iter().map(|v| v.to_array()));
             }
             if let Some(VertexAttributeValues::Float32x3(nor)) =
                 m.attribute_mut(Mesh::ATTRIBUTE_NORMAL.id)
@@ -187,13 +195,13 @@ fn save_load(
                 let (mut leader, mut leader_tm) = query_leader.single_mut();
                 leader.snake_head = data.snake_head;
                 leader.snake_bodys = data.snake_bodys;
-                leader_tm.translation = leader.snake_head.head_position().extend(0.0);
+                leader_tm.translation = leader.snake_head.head_position();
                 let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
                 let mut iter_body = leader.snake_bodys.iter();
                 while let (Some(mut tm), Some(body)) =
                     (iter_follower_tm.fetch_next(), iter_body.next())
                 {
-                    tm.translation = body.position.extend(0.0);
+                    tm.translation = body.position;
                 }
             }
         }
@@ -207,9 +215,9 @@ fn color(i: usize) -> Color {
 
 fn setup(
     mut commands: Commands,
-    assets: Res<AssetServer>,
+    // assets: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut clear_color: ResMut<ClearColor>,
 ) {
     clear_color.0 = Color::BLACK;
@@ -219,20 +227,23 @@ fn setup(
     path_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, Vec::<[f32; 3]>::new());
     path_mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, Vec::<[f32; 2]>::new());
     let path_mesh = meshes.add(path_mesh);
-    commands.spawn(ColorMesh2dBundle {
-        mesh: path_mesh.clone().into(),
-        transform: Transform::default(),
-        material: materials.add(ColorMaterial::from(Color::GRAY)),
-        ..default()
-    });
+    commands.spawn((
+        PbrBundle {
+            mesh: path_mesh.clone(),
+            material: materials.add(StandardMaterial::from(Color::GRAY)),
+            transform: Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            ..default()
+        },
+        NotShadowCaster,
+    ));
 
-    let sprite_handle = assets.load("ring.png");
+    let sphere = meshes.add(shape::Icosphere{radius: RADIUS, subdivisions: 4}.try_into().unwrap());
     let snake_bodys: Vec<_> = (1..10)
         .map(|i| {
             SnakeBody::new(
                 i as f32 * 0.1,
                 i as f32 * DISTANCE,
-                Vec2::new(i as f32 * -DISTANCE, 0.0),
+                Vec3::new(i as f32 * -DISTANCE, 0.0, 0.0),
             )
         })
         .collect();
@@ -241,32 +252,27 @@ fn setup(
         .enumerate()
         .map(|(i, body)| {
             commands
-                .spawn(SpriteBundle {
-                    texture: sprite_handle.clone(),
-                    transform: Transform::from_translation(body.position.extend(0.0)),
-                    sprite: Sprite {
-                        color: color(i + 1),
-                        ..Default::default()
-                    },
-                    ..Default::default()
+                .spawn(PbrBundle {
+                    mesh: sphere.clone(),
+                    material: materials.add(StandardMaterial::from(color(i + 1))),
+                    transform: Transform::from_translation(from_snake(body.position)),
+                    ..default()
                 })
                 .id()
         })
         .collect();
-    let targets: Vec<_> = snake_bodys
-        .iter()
-        .enumerate()
-        .map(|(i, body)| {
+    let quad = meshes.add(shape::Plane{size: 2.0, subdivisions: 0}.into());
+    let targets: Vec<_> = (0..snake_bodys.len())
+        .map(|i| {
             commands
-                .spawn(SpriteBundle {
-                    transform: Transform::from_translation(body.position.extend(0.0)),
-                    sprite: Sprite {
-                        color: color(i + 1),
-                        custom_size: Some(Vec2::new(2.0, 2.0)),
+                .spawn((
+                    PbrBundle {
+                        mesh: quad.clone(),
+                        material: materials.add(StandardMaterial::from(color(i + 1))),
                         ..Default::default()
                     },
-                    ..Default::default()
-                })
+                    NotShadowCaster,
+                ))
                 .id()
         })
         .collect();
@@ -275,13 +281,10 @@ fn setup(
         snake_bodys.last().unwrap().distance * 2.0,
     );
     commands.spawn((
-        SpriteBundle {
-            texture: sprite_handle.clone(),
-            sprite: Sprite {
-                color: color(0),
-                ..Default::default()
-            },
-            ..Default::default()
+        PbrBundle {
+            mesh: sphere.clone(),
+            material: materials.add(StandardMaterial::from(color(0))),
+            ..default()
         },
         Leader {
             snake_head,
@@ -291,38 +294,52 @@ fn setup(
             path_mesh,
         },
     ));
-    let sprite_circle = assets.load("circle.png");
-    let sprite_cross = assets.load("cross.png");
+    let cylinder = meshes.add(shape::Cylinder{radius: RADIUS, height: 10.0, resolution: 16, segments: 1}.into());
     let portals = [
         (0.0, 200.0, 0.0, -200.0),
         (150.0, 180.0, -150.0, -180.0),
         (0.0, -210.0, 200.0, 0.0),
     ];
     for (i, p) in portals.iter().enumerate() {
-        let color = Color::hsla(i as f32 * 49.0 + 180.0, 1.0, 0.4, 0.4);
+        let pcolor = Color::hsla(i as f32 * 49.0 + 180.0, 1.0, 0.4, 0.4);
         commands.spawn((
-            SpriteBundle {
-                transform: Transform::from_translation(Vec3::new(p.0, p.1, -0.01)),
-                texture: sprite_circle.clone(),
-                sprite: Sprite {
-                    color: color,
-                    ..Default::default()
-                },
-                ..Default::default()
+            PbrBundle {
+                mesh: cylinder.clone(),
+                material: materials.add(StandardMaterial::from(pcolor)),
+                transform: Transform::from_translation(from_snake(Vec3::new(p.0, p.1, 0.0))),
+                ..default()
             },
-            Portal(Vec2::new(p.2, p.3)),
+            NotShadowCaster,
+            Portal(from_snake(Vec3::new(p.2, p.3, 0.0))),
         ));
-        commands.spawn(SpriteBundle {
-            transform: Transform::from_translation(Vec3::new(p.2, p.3, -0.01)),
-            texture: sprite_cross.clone(),
-            sprite: Sprite {
-                color: color,
-                ..Default::default()
+        commands.spawn((
+            PbrBundle {
+                mesh: cylinder.clone(),
+                material: materials.add(StandardMaterial::from(pcolor)),
+                transform: Transform::from_translation(from_snake(Vec3::new(p.2, p.3, 0.0))),
+                ..default()
             },
-            ..Default::default()
-        });
+            NotShadowCaster,
+        ));
     }
-    commands.spawn(Camera2dBundle::default());
+    commands.spawn((
+        PbrBundle {
+            mesh: meshes.add(shape::Plane{size: 2000.0, subdivisions: 0}.into()),
+            material: materials.add(StandardMaterial::from(Color::hsl(0.0, 0.0, 0.7))),
+            transform: Transform::from_translation(Vec3::new(0.0, -RADIUS, 0.0)),
+            ..default()
+        },
+        NotShadowCaster,
+    ));
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight{shadows_enabled: true, ..default()},
+        transform: Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+        ..default()
+    });
+    commands.spawn(Camera3dBundle {
+        transform: Transform::from_xyz(0.0, 750.0, 200.0).looking_at(Vec3::ZERO, Vec3::Y),
+        ..default()
+    });
 }
 
 pub struct SnakePlugin;
@@ -341,6 +358,5 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugin(SnakePlugin)
-        // .add_plugin(TestPlugin)
         .run();
 }
