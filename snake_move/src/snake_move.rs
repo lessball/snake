@@ -288,9 +288,9 @@ impl SnakeHead {
                             let pos = self.segments[iseg + 1].pos_rec.last().unwrap().value;
                             let pos2d = pos.truncate();
                             if pos2d.distance_squared(head_pos) >= rr4
-                                && bodies[..i]
-                                    .iter()
-                                    .all(|body| pos2d.distance_squared(body.position.truncate()) >= rr4)
+                                && bodies[..i].iter().all(|body| {
+                                    pos2d.distance_squared(body.position.truncate()) >= rr4
+                                })
                             {
                                 bodies[i].position = pos;
                                 bodies[i].segment += 1;

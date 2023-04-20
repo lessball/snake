@@ -1,6 +1,6 @@
+use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
-use bevy::pbr::NotShadowCaster;
 
 use serde::{Deserialize, Serialize};
 
@@ -8,9 +8,10 @@ use snake_move::*;
 
 mod line_poly;
 use line_poly::LinePoly;
-
-// mod test_plugin;
-// use test_plugin::TestPlugin;
+mod ground_mesh;
+use ground_mesh::GroundMesh;
+mod obj_ground_loader;
+use obj_ground_loader::ObjGroundLoader;
 
 fn to_snake(v: Vec3) -> Vec3 {
     Vec3::new(v.x, -v.z, v.y)
@@ -44,11 +45,15 @@ fn leader_move(
     mousebutton_input: Res<Input<MouseButton>>,
     mut query_leader: Query<(&mut Leader, &mut Transform)>,
     portal: Query<(&Portal, &Transform), (With<Portal>, Without<Leader>)>,
+    ground: Query<&Handle<GroundMesh>>,
+    ground_assets: Res<Assets<GroundMesh>>,
 ) {
     let input_dir = Vec3::new(
-        keyboard_input.pressed(KeyCode::D) as i32 as f32 - keyboard_input.pressed(KeyCode::A) as i32 as f32,
+        keyboard_input.pressed(KeyCode::D) as i32 as f32
+            - keyboard_input.pressed(KeyCode::A) as i32 as f32,
         0.0,
-        keyboard_input.pressed(KeyCode::S) as i32 as f32 - keyboard_input.pressed(KeyCode::W) as i32 as f32,
+        keyboard_input.pressed(KeyCode::S) as i32 as f32
+            - keyboard_input.pressed(KeyCode::W) as i32 as f32,
     )
     .normalize_or_zero();
     let cursor_pos = if mousebutton_input.pressed(MouseButton::Left) {
@@ -73,11 +78,7 @@ fn leader_move(
                 break;
             }
         }
-        if teleport {
-            leader
-                .snake_head
-                .move_head(delta_time as f64, to_snake(leader_pos), MoveMode::Teleport);
-        } else {
+        if !teleport {
             let max_distance = delta_time * SPEED;
             let leader_delta = if let Some(p) = cursor_pos {
                 let mut v = p - leader_pos;
@@ -90,10 +91,20 @@ fn leader_move(
                 input_dir * max_distance
             };
             leader_pos += leader_delta;
-            leader
-                .snake_head
-                .move_head(delta_time as f64, to_snake(leader_pos), MoveMode::Normal);
         }
+        if let Some(ground) = ground_assets.get(ground.single()) {
+            let offset_y = Vec3::new(0.0, RADIUS, 0.0);
+            leader_pos = ground.fix_position(leader_pos - offset_y, 10.0) + offset_y;
+        }
+        leader.snake_head.move_head(
+            delta_time as f64,
+            to_snake(leader_pos),
+            if teleport {
+                MoveMode::Teleport
+            } else {
+                MoveMode::Normal
+            },
+        );
         tm.translation = leader_pos;
     }
 }
@@ -102,6 +113,8 @@ fn follower_move(
     time: Res<Time>,
     mut query_leader: Query<&mut Leader>,
     mut query_tm: Query<&mut Transform>,
+    ground: Query<&Handle<GroundMesh>>,
+    ground_assets: Res<Assets<GroundMesh>>,
 ) {
     for mut leader in query_leader.iter_mut() {
         let leader = &mut *leader;
@@ -120,10 +133,15 @@ fn follower_move(
             delta_time * SPEED * 0.1,
             RADIUS,
         );
+        let ground = ground_assets.get(ground.single());
         let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
         let mut iter_body = leader.snake_bodys.iter();
         while let (Some(mut tm), Some(body)) = (iter_follower_tm.fetch_next(), iter_body.next()) {
             tm.translation = from_snake(body.position);
+            if let Some(g) = ground.as_ref() {
+                let offset_y = Vec3::new(0.0, RADIUS, 0.0);
+                tm.translation = g.fix_position(tm.translation - offset_y, 10.0) + offset_y;
+            }
         }
         let mut iter_target_tm = query_tm.iter_many_mut(&leader.targets);
         for body in leader.snake_bodys.iter() {
@@ -132,7 +150,11 @@ fn follower_move(
                 if body.target.distance_squared(body.position) > 1.0 {
                     *tm = tm
                         .looking_at(from_snake(body.target), Vec3::Y)
-                        .with_scale(Vec3::new(2.0, 1.0, body.target.distance(body.position) * 0.5 + 1.0));
+                        .with_scale(Vec3::new(
+                            2.0,
+                            1.0,
+                            body.target.distance(body.position) * 0.5 + 1.0,
+                        ));
                 } else {
                     tm.rotation = Quat::IDENTITY;
                     tm.scale = Vec3::ONE;
@@ -215,7 +237,7 @@ fn color(i: usize) -> Color {
 
 fn setup(
     mut commands: Commands,
-    // assets: Res<AssetServer>,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut clear_color: ResMut<ClearColor>,
@@ -231,19 +253,28 @@ fn setup(
         PbrBundle {
             mesh: path_mesh.clone(),
             material: materials.add(StandardMaterial::from(Color::GRAY)),
-            transform: Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            transform: Transform::from_rotation(Quat::from_rotation_x(
+                -std::f32::consts::FRAC_PI_2,
+            )),
             ..default()
         },
         NotShadowCaster,
     ));
 
-    let sphere = meshes.add(shape::Icosphere{radius: RADIUS, subdivisions: 4}.try_into().unwrap());
+    let sphere = meshes.add(
+        shape::Icosphere {
+            radius: RADIUS,
+            subdivisions: 4,
+        }
+        .try_into()
+        .unwrap(),
+    );
     let snake_bodys: Vec<_> = (1..10)
         .map(|i| {
             SnakeBody::new(
                 i as f32 * 0.1,
                 i as f32 * DISTANCE,
-                Vec3::new(i as f32 * -DISTANCE, 0.0, 0.0),
+                Vec3::new(i as f32 * -DISTANCE, 0.0, RADIUS),
             )
         })
         .collect();
@@ -261,7 +292,13 @@ fn setup(
                 .id()
         })
         .collect();
-    let quad = meshes.add(shape::Plane{size: 2.0, subdivisions: 0}.into());
+    let quad = meshes.add(
+        shape::Plane {
+            size: 2.0,
+            subdivisions: 0,
+        }
+        .into(),
+    );
     let targets: Vec<_> = (0..snake_bodys.len())
         .map(|i| {
             commands
@@ -284,6 +321,7 @@ fn setup(
         PbrBundle {
             mesh: sphere.clone(),
             material: materials.add(StandardMaterial::from(color(0))),
+            transform: Transform::from_translation(Vec3::new(0.0, RADIUS, 0.0)),
             ..default()
         },
         Leader {
@@ -294,7 +332,15 @@ fn setup(
             path_mesh,
         },
     ));
-    let cylinder = meshes.add(shape::Cylinder{radius: RADIUS, height: 10.0, resolution: 16, segments: 1}.into());
+    let cylinder = meshes.add(
+        shape::Cylinder {
+            radius: RADIUS,
+            height: 10.0,
+            resolution: 16,
+            segments: 1,
+        }
+        .into(),
+    );
     let portals = [
         (0.0, 200.0, 0.0, -200.0),
         (150.0, 180.0, -150.0, -180.0),
@@ -306,11 +352,11 @@ fn setup(
             PbrBundle {
                 mesh: cylinder.clone(),
                 material: materials.add(StandardMaterial::from(pcolor)),
-                transform: Transform::from_translation(from_snake(Vec3::new(p.0, p.1, 0.0))),
+                transform: Transform::from_translation(from_snake(Vec3::new(p.0, p.1, RADIUS))),
                 ..default()
             },
             NotShadowCaster,
-            Portal(from_snake(Vec3::new(p.2, p.3, 0.0))),
+            Portal(from_snake(Vec3::new(p.2, p.3, RADIUS))),
         ));
         commands.spawn((
             PbrBundle {
@@ -324,15 +370,18 @@ fn setup(
     }
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(shape::Plane{size: 2000.0, subdivisions: 0}.into()),
+            mesh: asset_server.load("ground.obj"),
             material: materials.add(StandardMaterial::from(Color::hsl(0.0, 0.0, 0.7))),
-            transform: Transform::from_translation(Vec3::new(0.0, -RADIUS, 0.0)),
             ..default()
         },
         NotShadowCaster,
+        asset_server.load::<GroundMesh, &str>("ground.obj#ground"),
     ));
     commands.spawn(DirectionalLightBundle {
-        directional_light: DirectionalLight{shadows_enabled: true, ..default()},
+        directional_light: DirectionalLight {
+            shadows_enabled: true,
+            ..default()
+        },
         transform: Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
         ..default()
     });
@@ -346,7 +395,9 @@ pub struct SnakePlugin;
 
 impl Plugin for SnakePlugin {
     fn build(&self, app: &mut App) {
-        app.add_system(leader_move)
+        app.add_asset::<GroundMesh>()
+            .init_asset_loader::<ObjGroundLoader>()
+            .add_system(leader_move)
             .add_system(follower_move.after(leader_move))
             .add_system(update_path)
             .add_system(save_load)
