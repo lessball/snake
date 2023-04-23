@@ -23,7 +23,7 @@ fn movement_input(
             - keyboard_input.pressed(KeyCode::S) as i32 as f32,
     )
     .normalize_or_zero();
-    movement_input.target = if mousebutton_input.pressed(MouseButton::Left) {
+    movement_input.ray = if mousebutton_input.pressed(MouseButton::Left) {
         let (camera, camera_transform) = camera.single();
         let wnd = window.single();
         wnd.cursor_position()
