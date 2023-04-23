@@ -6,8 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-snake_move = { path = "../snake_move", features = ["serde", "serde_json"] }
-bevy = { version = "0.10", default_features = false, features = ["bevy_asset", "bevy_winit", "bevy_core_pipeline", "bevy_render", "bevy_pbr", "png", "x11"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0" }
+snake_move = { path = "../snake_move" }
+bevy = { version = "0.10", default_features = false, features = ["bevy_asset"] }
 parry3d = "0.13.3"
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+
+[features]
+default = ["sl", "render"]
+sl = [ "serde", "serde_json", "snake_move/serde", "snake_move/serde_json" ]
+render = [ "bevy/bevy_winit", "bevy/bevy_core_pipeline", "bevy/bevy_render", "bevy/bevy_pbr", "bevy/bevy_scene", "bevy/bevy_gltf", "bevy/x11" ]
+

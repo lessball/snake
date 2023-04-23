@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::math::Vec3;
 use bevy::reflect::TypeUuid;
 use parry3d::math::{Isometry, Point, Vector};
 use parry3d::query::closest_points::{
@@ -42,5 +42,16 @@ impl GroundMesh {
             };
         }
         p1
+    }
+
+    pub fn ray_cast(&self, ray: bevy::prelude::Ray, d: f32) -> Option<Vec3> {
+        let ray = Ray::new(
+            Point::new(ray.origin.x, ray.origin.y, ray.origin.z),
+            Vector::new(ray.direction.x, ray.direction.y, ray.direction.z),
+        );
+        self.mesh.cast_local_ray(&ray, d, false).map(|d| {
+            let p = ray.point_at(d);
+            Vec3::new(p.x, p.y, p.z)
+        })
     }
 }

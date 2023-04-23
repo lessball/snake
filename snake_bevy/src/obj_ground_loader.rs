@@ -1,11 +1,8 @@
 use bevy::asset::{AssetLoader, Error, LoadContext, LoadedAsset};
-use bevy::prelude::*;
-use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::utils::BoxedFuture;
 use parry3d::math::Point;
 use parry3d::shape::TriMesh;
 
-use std::collections::HashMap;
 use std::str::FromStr;
 
 use super::ground_mesh::GroundMesh;
@@ -21,9 +18,8 @@ impl AssetLoader for ObjGroundLoader {
     ) -> BoxedFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let data = std::str::from_utf8(bytes)?;
-            let (mesh, ground) = load_obj(data)?;
-            load_context.set_default_asset(LoadedAsset::new(mesh));
-            load_context.set_labeled_asset("ground", LoadedAsset::new(ground));
+            let ground = load_obj(data)?;
+            load_context.set_default_asset(LoadedAsset::new(ground));
             Ok(())
         })
     }
@@ -45,73 +41,28 @@ where
     Ok(a)
 }
 
-fn parse_3d<'a, I>(iter: I) -> Result<[f32; 3], Error>
-where
-    I: Iterator<Item = &'a str>,
-{
-    let a: [f32; 3] = parse_array(iter)?;
-    Ok([-a[2], a[1], a[0]])
-}
-
-pub fn load_obj(data: &str) -> Result<(Mesh, GroundMesh), Error> {
-    let mut v: Vec<[f32; 3]> = Vec::new();
-    let mut vn: Vec<[f32; 3]> = Vec::new();
-    let mut vt: Vec<[f32; 2]> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
-    let mut fmap = HashMap::new();
-    let mut fdata = Vec::new();
-    let mut vind = Vec::new();
+pub fn load_obj(data: &str) -> Result<GroundMesh, Error> {
+    let mut v: Vec<Point<f32>> = Vec::new();
+    let mut ind = Vec::new();
     for line in data.lines() {
         let mut t = line.split(" ");
         match t.next() {
             Some("v") => {
-                v.push(parse_3d(t)?);
-            }
-            Some("vn") => {
-                vn.push(parse_3d(t)?);
-            }
-            Some("vt") => {
-                vt.push(parse_array(t)?);
+                let a: [f32; 3] = parse_array(t)?;
+                v.push(Point::new(a[0], a[1], a[2]));
             }
             Some("f") => {
                 let mut fv = [0; 3];
                 for i in 0..3 {
                     let fsrc = t.next().ok_or_else(|| Error::msg("load obj error"))?;
-                    let mut f: [u32; 3] = parse_array(fsrc.split("/"))?;
-                    for j in f.iter_mut() {
-                        *j -= 1;
-                    }
-                    if let Some(fi) = fmap.get(&f) {
-                        indices.push(*fi);
-                    } else {
-                        let index = fdata.len() as u32;
-                        fmap.insert(f, index);
-                        fdata.push(f);
-                        indices.push(index);
-                    }
-                    fv[i] = f[0];
+                    let f: [u32; 1] = parse_array(fsrc.split("/"))?;
+                    fv[i] = f[0] - 1;
                 }
-                vind.push(fv)
+                ind.push(fv)
             }
             _ => {}
         }
     }
-    let mut pos = Vec::with_capacity(fdata.len());
-    let mut nor = Vec::with_capacity(fdata.len());
-    let mut uv = Vec::with_capacity(fdata.len());
-    for i in fdata.iter() {
-        pos.push(v[i[0] as usize]);
-        nor.push(vn[i[2] as usize]);
-        uv.push(vt[i[1] as usize]);
-    }
-    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
-    mesh.set_indices(Some(Indices::U32(indices)));
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nor);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
-
-    let v1 = v.iter().map(|tv| Point::new(tv[0], tv[1], tv[2])).collect();
-    let ground_mesh = GroundMesh::new(TriMesh::new(v1, vind));
-
-    Ok((mesh, ground_mesh))
+    let ground_mesh = GroundMesh::new(TriMesh::new(v, ind));
+    Ok(ground_mesh)
 }
