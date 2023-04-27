@@ -1,5 +1,6 @@
 use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
+use bevy_prototype_debug_lines::{ DebugLines, DebugLinesPlugin };
 use serde::{Deserialize, Serialize};
 
 use snake_move::*;
@@ -33,6 +34,40 @@ fn movement_input(
     };
 }
 
+fn update_lines(
+    query_leader: Query<&Leader>,
+    mut lines: ResMut<DebugLines>,
+    query_tm: Query<&Transform>,
+    keyboard_input: Res<Input<KeyCode>>,
+    mut show: Local<(bool, bool)>,
+) {
+    if keyboard_input.just_pressed(KeyCode::P) {
+        show.0 = !show.0;
+    }
+    if keyboard_input.just_pressed(KeyCode::T) {
+        show.1 = !show.1;
+    }
+    if show.0 || show.1 {
+        for leader in query_leader.iter() {
+            if show.0 {
+                let mut iter_path = leader.snake_head.get_path().map(from_snake);
+                if let Some(mut p0) = iter_path.next() {
+                    for p1 in iter_path {
+                        lines.line_colored(p0, p1, 0.0, Color::GRAY);
+                        p0 = p1;
+                    }
+                }
+            }
+            if show.1 {
+                let iter_tm = query_tm.iter_many(&leader.followers);
+                for (i, (body, tm)) in leader.snake_bodys.iter().zip(iter_tm).enumerate() {
+                    lines.line_colored(tm.translation, from_snake(body.target), 0.0, color(i + 1) * 0.9);
+                }
+            }
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct SaveData {
     snake_head: SnakeHead,
@@ -44,7 +79,7 @@ fn save_load(
     mut query_leader: Query<(&mut Leader, &mut Transform)>,
     mut query_tm: Query<&mut Transform, Without<Leader>>,
 ) {
-    if keyboard_input.just_pressed(KeyCode::O) {
+    if keyboard_input.just_pressed(KeyCode::Z) {
         let (leader, _) = query_leader.single();
         let data = SaveData {
             snake_head: leader.snake_head.clone(),
@@ -52,7 +87,7 @@ fn save_load(
         };
         let serialized = serde_json::to_string(&data).unwrap();
         std::fs::write("save.json", serialized).unwrap();
-    } else if keyboard_input.just_pressed(KeyCode::P) {
+    } else if keyboard_input.just_pressed(KeyCode::X) {
         if let Ok(s) = std::fs::read_to_string("save.json") {
             if let Ok(data) = serde_json::from_str::<SaveData>(&s) {
                 let (mut leader, mut leader_tm) = query_leader.single_mut();
@@ -170,6 +205,7 @@ impl Plugin for SnakePlugin {
             .add_system(movement_input)
             .add_system(leader_move.after(movement_input))
             .add_system(follower_move.after(leader_move))
+            .add_system(update_lines.after(follower_move))
             .add_system(save_load)
             .add_startup_system(setup_logic)
             .add_startup_system(setup_render.in_base_set(StartupSet::PostStartup));
@@ -180,5 +216,6 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugin(SnakePlugin)
+        .add_plugin(DebugLinesPlugin::default())
         .run();
 }
