@@ -31,6 +31,21 @@ pub struct MovementInput {
     pub axis: Vec2,
 }
 
+fn move_on_ground(from: Vec3, to: Vec3, ground: &GroundMesh) -> Vec3 {
+    let precision = 3.0;
+    let mut v = to - from;
+    let step = (v.length() / precision).floor() + 1.0;
+    v /= step;
+    let mut p = from;
+    p.y -= RADIUS;
+    for _ in 0..step as i32 {
+        p += v;
+        p = ground.fix_position(p, precision);
+    }
+    p.y += RADIUS;
+    p
+}
+
 pub fn leader_move(
     time: Res<Time>,
     input: Res<MovementInput>,
@@ -72,8 +87,7 @@ pub fn leader_move(
             leader_pos += move_delta;
         }
         if let Some(ground) = ground {
-            let offset_y = Vec3::new(0.0, RADIUS, 0.0);
-            leader_pos = ground.fix_position(leader_pos - offset_y, 10.0) + offset_y;
+            leader_pos = move_on_ground(tm.translation, leader_pos, ground);
         }
         leader.snake_head.move_head(
             delta_time as f64,
@@ -116,10 +130,11 @@ pub fn follower_move(
         let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
         let mut iter_body = leader.snake_bodys.iter();
         while let (Some(mut tm), Some(body)) = (iter_follower_tm.fetch_next(), iter_body.next()) {
-            tm.translation = from_snake(body.position);
+            let move_to = from_snake(body.position);
             if let Some(g) = ground.as_ref() {
-                let offset_y = Vec3::new(0.0, RADIUS, 0.0);
-                tm.translation = g.fix_position(tm.translation - offset_y, 10.0) + offset_y;
+                tm.translation = move_on_ground(tm.translation, move_to, g);
+            } else {
+                tm.translation = move_to;
             }
         }
     }
