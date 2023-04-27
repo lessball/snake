@@ -207,6 +207,7 @@ impl Plugin for SnakePlugin {
             .add_system(follower_move.after(leader_move))
             .add_system(update_lines.after(follower_move))
             .add_system(save_load)
+            .add_system(bevy::window::close_on_esc)
             .add_startup_system(setup_logic)
             .add_startup_system(setup_render.in_base_set(StartupSet::PostStartup));
     }

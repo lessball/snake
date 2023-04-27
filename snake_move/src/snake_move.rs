@@ -258,7 +258,6 @@ impl SnakeHead {
         struct BodyMove {
             position: Vec2,
             delta: Vec2,
-            origin: Vec2,
             target: Vec3,
             max_move: f32,
         }
@@ -266,7 +265,6 @@ impl SnakeHead {
         body_move.push(BodyMove {
             position: head_pos,
             delta: Vec2::ZERO,
-            origin: head_pos,
             target: self.position,
             max_move: 0.0,
         });
@@ -321,7 +319,6 @@ impl SnakeHead {
                     body_move.push(BodyMove {
                         position: body.position.truncate(),
                         delta,
-                        origin: body.position.truncate(),
                         target,
                         max_move: max_move1,
                     });
@@ -330,7 +327,6 @@ impl SnakeHead {
                     body_move.push(BodyMove {
                         position: body.position.truncate(),
                         delta: Vec2::ZERO,
-                        origin: body.position.truncate(),
                         target: body.position,
                         max_move,
                     });
@@ -338,11 +334,19 @@ impl SnakeHead {
             }
         }
 
+        let may_collide_in_z = |i: usize, j: usize| {
+            let z0 = if i == 0 { self.position.z } else { bodies[i - 1].position.z };
+            let z1 = bodies[j - 1].position.z;
+            (z0 - z1).abs() <= radius * 2.0
+        };
         for _ in 0..SOLVE_STEP {
             for bm in body_move.iter_mut().skip(1) {
                 bm.position += bm.delta / SOLVE_STEP as f32;
             }
             Self::foreach_pair(body_move.len(), |i, j| {
+                if !may_collide_in_z(i, j) {
+                    return;
+                }
                 let bm0 = &body_move[i];
                 let bm1 = &body_move[j];
                 if bm0.position.distance_squared(bm1.position) >= rr4 {
@@ -364,6 +368,9 @@ impl SnakeHead {
                 }
             });
             Self::foreach_pair(body_move.len(), |i, j| {
+                if !may_collide_in_z(i, j) {
+                    return;
+                }
                 let bm0 = &body_move[i];
                 let bm1 = &body_move[j];
                 if bm0.position.distance_squared(bm1.position) >= rr4 * 1.0001 {
@@ -401,14 +408,15 @@ impl SnakeHead {
                     }
                 }
             });
-            for bm in body_move.iter_mut().skip(1) {
-                let distance = bm.origin.distance(bm.position);
+            for (bm, body) in body_move.iter_mut().skip(1).zip(bodies.iter()) {
+                let origin = body.position.truncate();
+                let distance = origin.distance(bm.position);
                 if distance >= min_move / SOLVE_STEP as f32 {
                     if distance > bm.max_move {
-                        bm.position = bm.origin.lerp(bm.position, bm.max_move / distance);
+                        bm.position = origin.lerp(bm.position, bm.max_move / distance);
                     }
                 } else {
-                    bm.position = bm.origin;
+                    bm.position = origin;
                 }
             }
         }

@@ -130,12 +130,27 @@ pub fn follower_move(
         let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
         let mut iter_body = leader.snake_bodys.iter();
         while let (Some(mut tm), Some(body)) = (iter_follower_tm.fetch_next(), iter_body.next()) {
-            let move_to = from_snake(body.position);
+            let mut move_to = from_snake(body.position);
             if let Some(g) = ground.as_ref() {
-                tm.translation = move_on_ground(tm.translation, move_to, g);
-            } else {
-                tm.translation = move_to;
+                move_to = move_on_ground(tm.translation, move_to, g);
+                if (move_to.y - body.target.y).abs() > RADIUS * 2.0 {
+                    // fix different layer
+                    let p0 = Vec2::new(move_to.x, move_to.z);
+                    let t1 = from_snake(body.target);
+                    let p1 = Vec2::new(t1.x, t1.z);
+                    if p0.distance_squared(p1) < RADIUS * RADIUS {
+                        let ray = Ray {
+                            origin: Vec3::new(move_to.x, t1.y - RADIUS * 0.5, move_to.z),
+                            direction: Vec3::new(0.0, -1.0, 0.0),
+                        };
+                        if let Some(p) = g.ray_cast(ray, RADIUS) {
+                            move_to = p;
+                            move_to.y += RADIUS;
+                        }
+                    }
+                }
             }
+            tm.translation = move_to;
         }
     }
 }
