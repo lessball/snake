@@ -6,21 +6,16 @@ use bevy::utils::{Duration, Instant};
 mod logic;
 use logic::*;
 mod ground_mesh;
-mod obj_ground_loader;
+use ground_mesh::GroundMesh;
 
-pub fn init() -> App {
+pub fn init(ground: Option<&str>) -> App {
     let mut app = App::new();
-    app.add_plugin(bevy::core::TaskPoolPlugin::default())
-        .add_plugin(bevy::core::TypeRegistrationPlugin::default())
-        .add_plugin(bevy::transform::TransformPlugin::default())
-        .add_plugin(bevy::asset::AssetPlugin::default())
-        .add_asset::<ground_mesh::GroundMesh>()
-        .init_resource::<Time>()
-        .init_resource::<MovementInput>()
-        .init_asset_loader::<obj_ground_loader::ObjGroundLoader>()
-        .add_system(leader_move)
-        .add_system(follower_move.after(leader_move))
-        .add_startup_system(setup_logic);
+    app.init_resource::<Time>()
+        .add_plugin(bevy::core::TaskPoolPlugin::default())
+        .add_plugin(SnakeLogicPlugin);
+    if let Some(ground) = ground.and_then(|data| GroundMesh::from_obj(data)) {
+        app.insert_resource(ground);
+    }
     app.setup();
     app
 }

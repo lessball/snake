@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 snake_move = { path = "../snake_move" }
-bevy = { version = "0.10", default_features = false, features = ["bevy_asset"] }
+bevy = { version = "0.10", default_features = false }
 bevy_prototype_debug_lines = { version = "0.10.1", features = ["3d"], optional = true }
 parry3d = "0.13.3"
 serde = { version = "1.0", features = ["derive"], optional = true }
@@ -16,5 +16,15 @@ serde_json = { version = "1.0", optional = true }
 [features]
 default = ["sl", "render"]
 sl = [ "serde", "serde_json", "snake_move/serde", "snake_move/serde_json" ]
-render = [ "bevy/bevy_winit", "bevy/bevy_core_pipeline", "bevy/bevy_render", "bevy/bevy_pbr", "bevy/bevy_scene", "bevy/bevy_gltf", "bevy/x11", "bevy_prototype_debug_lines" ]
+render = [
+    "bevy/bevy_asset",
+    "bevy/bevy_scene",
+    "bevy/bevy_winit",
+    "bevy/bevy_core_pipeline",
+    "bevy/bevy_pbr",
+    "bevy/bevy_gltf",
+    "bevy/bevy_render",
+    "bevy/x11",
+    "bevy_prototype_debug_lines",
+]
 

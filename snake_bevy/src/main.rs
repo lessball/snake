@@ -1,14 +1,17 @@
-use bevy::pbr::NotShadowCaster;
 use bevy::prelude::*;
+use bevy::asset::FileAssetIo;
+use bevy::input::InputSystem;
+use bevy::pbr::NotShadowCaster;
 use bevy_prototype_debug_lines::{ DebugLines, DebugLinesPlugin };
 use serde::{Deserialize, Serialize};
+use std::fs;
 
 use snake_move::*;
 
 mod logic;
 use logic::*;
 mod ground_mesh;
-mod obj_ground_loader;
+use ground_mesh::GroundMesh;
 
 fn movement_input(
     mut movement_input: ResMut<MovementInput>,
@@ -199,23 +202,23 @@ pub struct SnakePlugin;
 
 impl Plugin for SnakePlugin {
     fn build(&self, app: &mut App) {
-        app.add_asset::<ground_mesh::GroundMesh>()
-            .init_resource::<MovementInput>()
-            .init_asset_loader::<obj_ground_loader::ObjGroundLoader>()
-            .add_system(movement_input)
-            .add_system(leader_move.after(movement_input))
-            .add_system(follower_move.after(leader_move))
-            .add_system(update_lines.after(follower_move))
+        app.add_system(movement_input.in_base_set(CoreSet::PreUpdate).after(InputSystem))
+            .add_system(update_lines.in_base_set(CoreSet::PostUpdate))
             .add_system(save_load)
             .add_system(bevy::window::close_on_esc)
-            .add_startup_system(setup_logic)
             .add_startup_system(setup_render.in_base_set(StartupSet::PostStartup));
+        let ground_path = FileAssetIo::get_base_path().join("assets/ground.obj");
+        let ground_data = fs::read_to_string(ground_path).ok();
+        if let Some(ground) = ground_data.and_then(|data| GroundMesh::from_obj(&data)) {
+            app.insert_resource(ground);
+        }
     }
 }
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugin(SnakeLogicPlugin)
         .add_plugin(SnakePlugin)
         .add_plugin(DebugLinesPlugin::default())
         .run();

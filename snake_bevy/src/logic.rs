@@ -46,16 +46,15 @@ fn move_on_ground(from: Vec3, to: Vec3, ground: &GroundMesh) -> Vec3 {
     p
 }
 
-pub fn leader_move(
+fn leader_move(
     time: Res<Time>,
     input: Res<MovementInput>,
+    ground: Option<Res<GroundMesh>>,
     mut query_leader: Query<(&mut Leader, &mut Transform)>,
     portal: Query<(&Portal, &Transform), Without<Leader>>,
-    ground: Query<&Handle<GroundMesh>>,
-    ground_assets: Res<Assets<GroundMesh>>,
 ) {
     let delta_time = time.delta_seconds();
-    let ground = ground_assets.get(ground.single());
+    let ground = ground.as_ref();
     let target = input.ray.map(|ray| {
         ground
             .and_then(|g| g.ray_cast(ray, 999999.0))
@@ -86,8 +85,8 @@ pub fn leader_move(
             };
             leader_pos += move_delta;
         }
-        if let Some(ground) = ground {
-            leader_pos = move_on_ground(tm.translation, leader_pos, ground);
+        if let Some(g) = ground {
+            leader_pos = move_on_ground(tm.translation, leader_pos, g);
         }
         leader.snake_head.move_head(
             delta_time as f64,
@@ -102,12 +101,11 @@ pub fn leader_move(
     }
 }
 
-pub fn follower_move(
+fn follower_move(
     time: Res<Time>,
+    ground: Option<Res<GroundMesh>>,
     mut query_leader: Query<&mut Leader>,
     mut query_tm: Query<&mut Transform>,
-    ground: Query<&Handle<GroundMesh>>,
-    ground_assets: Res<Assets<GroundMesh>>,
 ) {
     for mut leader in query_leader.iter_mut() {
         let leader = &mut *leader;
@@ -126,7 +124,6 @@ pub fn follower_move(
             delta_time * SPEED * 0.1,
             RADIUS,
         );
-        let ground = ground_assets.get(ground.single());
         let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
         let mut iter_body = leader.snake_bodys.iter();
         while let (Some(mut tm), Some(body)) = (iter_follower_tm.fetch_next(), iter_body.next()) {
@@ -155,7 +152,7 @@ pub fn follower_move(
     }
 }
 
-pub fn setup_logic(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn setup_logic(mut commands: Commands) {
     let snake_bodys: Vec<_> = (1..10)
         .map(|i| {
             SnakeBody::new(
@@ -196,5 +193,15 @@ pub fn setup_logic(mut commands: Commands, asset_server: Res<AssetServer>) {
             Portal(from_snake(Vec3::new(p.2, p.3, RADIUS))),
         ));
     }
-    commands.spawn(asset_server.load::<GroundMesh, &str>("ground.obj"));
+}
+
+pub struct SnakeLogicPlugin;
+
+impl Plugin for SnakeLogicPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<MovementInput>()
+            .add_system(leader_move)
+            .add_system(follower_move.after(leader_move))
+            .add_startup_system(setup_logic);
+    }
 }

@@ -1,5 +1,4 @@
-use bevy::math::Vec3;
-use bevy::reflect::TypeUuid;
+use bevy::prelude::*;
 use parry3d::math::{Isometry, Point, Vector};
 use parry3d::query::closest_points::{
     ClosestPoints, CompositeShapeAgainstShapeClosestPointsVisitor,
@@ -8,8 +7,7 @@ use parry3d::query::DefaultQueryDispatcher;
 use parry3d::query::{Ray, RayCast};
 use parry3d::shape::{Ball, TriMesh, TypedSimdCompositeShape};
 
-#[derive(TypeUuid)]
-#[uuid = "38dfdb54-6b1a-4ea2-8cba-c44a641af4d6"]
+#[derive(Resource)]
 pub struct GroundMesh {
     mesh: TriMesh,
 }
@@ -18,6 +16,33 @@ impl GroundMesh {
     pub fn new(mesh: TriMesh) -> Self {
         Self { mesh }
     }
+
+    pub fn from_obj(data: &str) -> Option<GroundMesh> {
+        let mut v: Vec<Point<f32>> = Vec::new();
+        let mut ind = Vec::new();
+        for line in data.lines() {
+            let mut t = line.split(" ");
+            match t.next() {
+                Some("v") => {
+                    let mut a = [0.0; 3];
+                    for i in 0..3 {
+                        a[i] = t.next()?.parse().ok()?
+                    }
+                    v.push(Point::new(a[0], a[1], a[2]));
+                }
+                Some("f") => {
+                    let mut fv = [0; 3];
+                    for i in 0..3 {
+                        fv[i] = t.next()?.parse::<u32>().ok()? - 1;
+                    }
+                    ind.push(fv)
+                }
+                _ => {}
+            }
+        }
+        let ground_mesh = GroundMesh::new(TriMesh::new(v, ind));
+        Some(ground_mesh)
+    }    
 
     pub fn fix_position(&self, p: Vec3, d: f32) -> Vec3 {
         let ray = Ray::new(Point::new(p.x, p.y + d, p.z), Vector::new(0.0, -1.0, 0.0));
