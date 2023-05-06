@@ -72,9 +72,10 @@ impl<T> MoveRecords<T> {
         }
     }
 
-    pub fn trim(&mut self, threshold: f64) {
-        if self.len() > 128 && self[128].key + threshold < self.last().unwrap().key {
-            self.0.drain(..128);
+    pub fn trim(&mut self, key: f64) {
+        let len = self.len();
+        if len > 2 && self[len / 2 + 1].key < key {
+            self.0.drain(..len / 2);
         }
     }
 
@@ -128,20 +129,16 @@ impl MoveSegment {
 pub struct SnakeHead {
     position: Vec3,
     time: f64,
-    max_delay: f32,
-    max_distance: f32,
     dis_rec: MoveRecords<f64>,
     segment_first: usize,
     segments: Vec<MoveSegment>,
 }
 
 impl SnakeHead {
-    pub fn new(max_delay: f32, max_distance: f32) -> Self {
+    pub fn new() -> Self {
         Self {
             position: Vec3::ZERO,
             time: 0.0,
-            max_delay,
-            max_distance,
             dis_rec: MoveRecords::new(),
             segment_first: 0,
             segments: Vec::new(),
@@ -221,9 +218,6 @@ impl SnakeHead {
                     value: position,
                 });
             }
-
-            self.dis_rec.trim(self.max_delay as f64);
-            self.segments[0].pos_rec.trim(self.max_distance as f64);
         } else {
             self.dis_rec.push(MoveRecord {
                 key: self.time,
@@ -268,9 +262,13 @@ impl SnakeHead {
             target: self.position,
             max_move: 0.0,
         });
+        let mut min_time = f64::MAX;
+        let mut min_distance = f64::MAX;
         for i in 0..bodies.len() {
             let time = self.time - bodies[i].delay as f64;
+            min_time = min_time.min(time);
             let distance = self.dis_rec.get_linear(time).unwrap() - bodies[i].distance as f64;
+            min_distance = min_distance.min(distance);
             let iseg = bodies[i].segment.saturating_sub(self.segment_first);
             if iseg + 1 < self.segments.len() {
                 let can_leave = match self.segments[iseg].move_mode {
@@ -431,6 +429,11 @@ impl SnakeHead {
         if seg_min > self.segment_first {
             self.segments.drain(0..seg_min - self.segment_first);
             self.segment_first = seg_min;
+        }
+        self.dis_rec.trim(min_time);
+        match self.segments[0].move_mode {
+            MoveMode::Normal => self.segments[0].pos_rec.trim(min_distance),
+            _ => {},
         }
     }
 

@@ -10,4 +10,3 @@ glam = { version = "0.23.0"}
 num-traits = "0.2.15"
 delegate = "0.9.0"
 serde = { version = "1.0", features = ["derive"], optional = true }
-serde_json = { version = "1.0", optional = true }

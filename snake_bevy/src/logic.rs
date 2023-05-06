@@ -170,10 +170,7 @@ fn setup_logic(mut commands: Commands) {
                 .id()
         })
         .collect();
-    let snake_head = SnakeHead::new(
-        snake_bodys.last().unwrap().delay * 2.0,
-        snake_bodys.last().unwrap().distance * 2.0,
-    );
+    let snake_head = SnakeHead::new();
     commands.spawn((
         Transform::from_translation(Vec3::new(0.0, RADIUS, 0.0)),
         Leader {
