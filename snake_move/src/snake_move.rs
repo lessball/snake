@@ -452,6 +452,7 @@ pub struct SnakeBody {
     pub position: Vec3,
     pub target: Vec3,
     pub segment: usize,
+    pub position_prev: Vec3,
 }
 
 impl SnakeBody {
@@ -462,6 +463,7 @@ impl SnakeBody {
             position,
             target: Vec3::ZERO,
             segment: 0,
+            position_prev: position,
         }
     }
 }

@@ -60,7 +60,7 @@ fn leader_move(
             .and_then(|g| g.ray_cast(ray, 999999.0))
             .unwrap_or_else(|| ray.origin - ray.direction * (ray.origin.y / ray.direction.y))
     });
-    for (mut leader, mut tm) in query_leader.iter_mut() {
+    query_leader.par_iter_mut().for_each_mut(|(mut leader, mut tm)| {
         let mut leader_pos = tm.translation;
         let mut teleport = false;
         for (pt, tm) in portal.iter() {
@@ -98,7 +98,7 @@ fn leader_move(
             },
         );
         tm.translation = leader_pos;
-    }
+    });
 }
 
 fn follower_move(
@@ -107,7 +107,9 @@ fn follower_move(
     mut query_leader: Query<&mut Leader>,
     mut query_tm: Query<&mut Transform>,
 ) {
-    for mut leader in query_leader.iter_mut() {
+    let delta_time = time.delta_seconds();
+    // let delta_time = 1.0 / 60.0;
+    query_leader.par_iter_mut().for_each_mut(|mut leader| {
         let leader = &mut *leader;
         for (body, tm) in leader
             .snake_bodys
@@ -115,39 +117,44 @@ fn follower_move(
             .zip(query_tm.iter_many(&leader.followers))
         {
             body.position = to_snake(tm.translation);
+            body.position_prev = body.position;
         }
-        let delta_time = time.delta_seconds();
-        // let delta_time = 1.0 / 60.0;
         leader.snake_head.solve_body(
             &mut leader.snake_bodys,
             delta_time * SPEED,
             delta_time * SPEED * 0.1,
             RADIUS,
         );
-        let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
-        let mut iter_body = leader.snake_bodys.iter();
-        while let (Some(mut tm), Some(body)) = (iter_follower_tm.fetch_next(), iter_body.next()) {
-            let mut move_to = from_snake(body.position);
-            if let Some(g) = ground.as_ref() {
-                move_to = move_on_ground(tm.translation, move_to, g);
-                if (move_to.y - body.target.y).abs() > RADIUS * 2.0 {
+        if let Some(g) = ground.as_ref() {
+            for body in leader.snake_bodys.iter_mut() {
+                let mut pos = from_snake(body.position);
+                let pos_prev = from_snake(body.position_prev);
+                pos = move_on_ground(pos_prev, pos, g);
+                if (pos.y - body.target.y).abs() > RADIUS * 2.0 {
                     // fix different layer
-                    let p0 = Vec2::new(move_to.x, move_to.z);
+                    let p0 = Vec2::new(pos.x, pos.z);
                     let t1 = from_snake(body.target);
                     let p1 = Vec2::new(t1.x, t1.z);
                     if p0.distance_squared(p1) < RADIUS * RADIUS {
                         let ray = Ray {
-                            origin: Vec3::new(move_to.x, t1.y - RADIUS * 0.5, move_to.z),
+                            origin: Vec3::new(pos.x, t1.y - RADIUS * 0.5, pos.z),
                             direction: Vec3::new(0.0, -1.0, 0.0),
                         };
                         if let Some(p) = g.ray_cast(ray, RADIUS) {
-                            move_to = p;
-                            move_to.y += RADIUS;
+                            pos = p;
+                            pos.y += RADIUS;
                         }
                     }
                 }
+                body.position = to_snake(pos);
             }
-            tm.translation = move_to;
+        }
+    });
+    for leader in query_leader.iter() {
+        let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
+        let mut iter_body = leader.snake_bodys.iter();
+        while let (Some(mut tm), Some(body)) = (iter_follower_tm.fetch_next(), iter_body.next()) {
+            tm.translation = from_snake(body.position);
         }
     }
 }
