@@ -37,12 +37,10 @@ fn move_on_ground(from: Vec3, to: Vec3, ground: &GroundMesh) -> Vec3 {
     let step = (v.length() / precision).floor() + 1.0;
     v /= step;
     let mut p = from;
-    p.y -= RADIUS;
     for _ in 0..step as i32 {
         p += v;
-        p = ground.fix_position(p, precision);
+        p = ground.fix_position(p, precision, RADIUS);
     }
-    p.y += RADIUS;
     p
 }
 
@@ -86,7 +84,11 @@ fn leader_move(
             leader_pos += move_delta;
         }
         if let Some(g) = ground {
-            leader_pos = move_on_ground(tm.translation, leader_pos, g);
+            if !teleport {
+                leader_pos = move_on_ground(tm.translation, leader_pos, g);
+            } else {
+                leader_pos = g.fix_position(leader_pos, 3.0, RADIUS);
+            }
         }
         leader.snake_head.move_head(
             delta_time as f64,
@@ -117,19 +119,20 @@ fn follower_move(
             .zip(query_tm.iter_many(&leader.followers))
         {
             body.position = to_snake(tm.translation);
-            body.position_prev = body.position;
         }
+        let fix_position = ground.as_ref().map(|g| {
+            |p, prev| to_snake(move_on_ground(from_snake(prev), from_snake(p), g))
+        });
         leader.snake_head.solve_body(
             &mut leader.snake_bodys,
             delta_time * SPEED,
             delta_time * SPEED * 0.1,
             RADIUS,
+            fix_position
         );
         if let Some(g) = ground.as_ref() {
             for body in leader.snake_bodys.iter_mut() {
                 let mut pos = from_snake(body.position);
-                let pos_prev = from_snake(body.position_prev);
-                pos = move_on_ground(pos_prev, pos, g);
                 if (pos.y - body.target.y).abs() > RADIUS * 2.0 {
                     // fix different layer
                     let p0 = Vec2::new(pos.x, pos.z);
@@ -143,6 +146,18 @@ fn follower_move(
                         if let Some(p) = g.ray_cast(ray, RADIUS) {
                             pos = p;
                             pos.y += RADIUS;
+                        }
+                    }
+                } else {
+                    // fix stuck
+                    let target = from_snake(body.target);
+                    let v = target - pos;
+                    let len2 = v.length_squared();
+                    if len2 > RADIUS * RADIUS * 64.0 {
+                        let pos1 = pos + v * (3.0 / len2.sqrt());
+                        let pos2 = g.fix_position(pos1, 3.0, RADIUS);
+                        if pos2.distance_squared(pos) < 0.1 {
+                            pos = target;
                         }
                     }
                 }

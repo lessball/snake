@@ -44,7 +44,8 @@ impl GroundMesh {
         Some(ground_mesh)
     }    
 
-    pub fn fix_position(&self, p: Vec3, d: f32) -> Vec3 {
+    pub fn fix_position(&self, mut p: Vec3, d: f32, h: f32) -> Vec3 {
+        p.y -= h;
         let ray = Ray::new(Point::new(p.x, p.y + d, p.z), Vector::new(0.0, -1.0, 0.0));
         let mut p1 = p;
         if let Some(t) = self.mesh.cast_local_ray(&ray, d * 2.0, false) {
@@ -66,6 +67,7 @@ impl GroundMesh {
                 p1 = Vec3::new(p2.x, p2.y, p2.z);
             };
         }
+        p1.y += h;
         p1
     }
 

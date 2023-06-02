@@ -1,5 +1,5 @@
 use delegate::delegate;
-use glam::{Mat2, Vec2, Vec3};
+use glam::{Mat2, Vec2, Vec3, Vec3Swizzles};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::ops::{Index, IndexMut};
@@ -35,7 +35,7 @@ struct MoveRecord<T> {
 
 impl MoveRecord<Vec3> {
     fn pos2d(&self) -> Vec2 {
-        self.value.truncate()
+        self.value.xy()
     }
 }
 
@@ -153,7 +153,7 @@ impl SnakeHead {
         self.position = position;
         self.time += dt;
         if !self.dis_rec.is_empty() {
-            let pos2d = position.truncate();
+            let pos2d = position.xy();
             let new_seg = match move_mode {
                 MoveMode::Normal => move_mode != self.segments.last().unwrap().move_mode,
                 MoveMode::Teleport => true,
@@ -236,28 +236,43 @@ impl SnakeHead {
         }
     }
 
-    pub fn solve_body(
+    pub fn solve_body<F>(
         &mut self,
         bodies: &mut [SnakeBody],
         max_move: f32,
         min_move: f32,
         radius: f32,
-    ) {
+        fix_position: Option<F>
+    ) where F: Fn(Vec3, Vec3) -> Vec3
+    {
         if self.dis_rec.is_empty() {
             return;
         }
-        let head_pos = self.position.truncate();
+        let head_pos = self.position.xy();
         let rr4 = radius * radius * 4.0;
 
         struct BodyMove {
-            position: Vec2,
+            position: Vec3,
             delta: Vec2,
             target: Vec3,
             max_move: f32,
         }
+        impl BodyMove {
+            fn pos2d(&self) -> Vec2 {
+                self.position.xy()
+            }
+            fn set_pos2d(&mut self, p: Vec2) {
+                self.position.x = p.x;
+                self.position.y = p.y;
+            }
+            fn add_pos2d(&mut self, v: Vec2) {
+                self.position.x += v.x;
+                self.position.y += v.y;
+            }
+        }
         let mut body_move: Vec<BodyMove> = Vec::with_capacity(bodies.len() + 1);
         body_move.push(BodyMove {
-            position: head_pos,
+            position: self.position,
             delta: Vec2::ZERO,
             target: self.position,
             max_move: 0.0,
@@ -282,10 +297,10 @@ impl SnakeHead {
                         }
                         MoveMode::Teleport => {
                             let pos = self.segments[iseg + 1].pos_rec.last().unwrap().value;
-                            let pos2d = pos.truncate();
+                            let pos2d = pos.xy();
                             if pos2d.distance_squared(head_pos) >= rr4
                                 && bodies[..i].iter().all(|body| {
-                                    pos2d.distance_squared(body.position.truncate()) >= rr4
+                                    pos2d.distance_squared(body.position.xy()) >= rr4
                                 })
                             {
                                 bodies[i].position = pos;
@@ -304,18 +319,18 @@ impl SnakeHead {
                     } else {
                         (pos_rec[0].value, pos_rec[0].key - distance)
                     };
-                    let current_distance = target.truncate().distance(body.position.truncate());
+                    let current_distance = target.xy().distance(body.position.xy());
                     let expect_distance = (current_distance - remain.max(0.0) as f32).max(0.0);
                     let k = invert_lerp(1.5, 4.0, expect_distance / radius).clamp(0.0, 1.0);
                     let max_move1 = max_move * (1.5 + k * 0.5);
                     let delta = if current_distance > 0.0001 {
-                        (target.truncate() - body.position.truncate())
+                        (target.xy() - body.position.xy())
                             * (expect_distance.min(max_move1) / current_distance)
                     } else {
                         Vec2::ZERO
                     };
                     body_move.push(BodyMove {
-                        position: body.position.truncate(),
+                        position: body.position,
                         delta,
                         target,
                         max_move: max_move1,
@@ -323,7 +338,7 @@ impl SnakeHead {
                 }
                 MoveMode::Teleport => {
                     body_move.push(BodyMove {
-                        position: body.position.truncate(),
+                        position: body.position,
                         delta: Vec2::ZERO,
                         target: body.position,
                         max_move,
@@ -332,25 +347,20 @@ impl SnakeHead {
             }
         }
 
-        let may_collide_in_z = |i: usize, j: usize| {
-            let z0 = if i == 0 { self.position.z } else { bodies[i - 1].position.z };
-            let z1 = bodies[j - 1].position.z;
-            (z0 - z1).abs() <= radius * 2.0
-        };
         for _ in 0..SOLVE_STEP {
             for bm in body_move.iter_mut().skip(1) {
-                bm.position += bm.delta / SOLVE_STEP as f32;
+                bm.add_pos2d(bm.delta / SOLVE_STEP as f32);
             }
             Self::foreach_pair(body_move.len(), |i, j| {
-                if !may_collide_in_z(i, j) {
-                    return;
-                }
                 let bm0 = &body_move[i];
                 let bm1 = &body_move[j];
-                if bm0.position.distance_squared(bm1.position) >= rr4 {
+                if (bm0.position.z - bm1.position.z).abs() > radius * 2.0 {
                     return;
                 }
-                let v0 = bm1.position - bm0.position;
+                if bm0.pos2d().distance_squared(bm1.pos2d()) >= rr4 {
+                    return;
+                }
+                let v0 = bm1.pos2d() - bm0.pos2d();
                 let len = v0.length();
                 let d = if len > 0.0001 {
                     v0 * (radius / len - 0.5)
@@ -359,23 +369,23 @@ impl SnakeHead {
                     radius * Vec2::new(x, y)
                 };
                 if i > 0 {
-                    body_move[i].position -= d;
-                    body_move[j].position += d;
+                    body_move[i].add_pos2d(-d);
+                    body_move[j].add_pos2d(d);
                 } else {
-                    body_move[j].position += d * 2.0;
+                    body_move[j].add_pos2d(d * 2.0);
                 }
             });
             Self::foreach_pair(body_move.len(), |i, j| {
-                if !may_collide_in_z(i, j) {
-                    return;
-                }
                 let bm0 = &body_move[i];
                 let bm1 = &body_move[j];
-                if bm0.position.distance_squared(bm1.position) >= rr4 * 1.0001 {
+                if (bm0.position.z - bm1.position.z).abs() > radius * 2.0 {
                     return;
                 }
-                let dp = bm1.position - bm0.position;
-                if dp.dot(bm1.target.truncate() - bm0.target.truncate()) >= -0.001 {
+                if bm0.pos2d().distance_squared(bm1.pos2d()) >= rr4 * 1.0001 {
+                    return;
+                }
+                let dp = bm1.pos2d() - bm0.pos2d();
+                if dp.dot(bm1.target.xy() - bm0.target.xy()) >= -0.001 {
                     return;
                 }
                 let vertical = Vec2::new(dp.y, -dp.x);
@@ -386,42 +396,44 @@ impl SnakeHead {
                 let offset = Mat2::from_angle(angle).mul_vec2(dp) - dp;
                 let check_move = |pos: Vec2| {
                     for (k, bm) in body_move.iter().enumerate() {
-                        if k != i && k != j && pos.distance_squared(bm.position) < rr4 {
+                        if k != i && k != j && pos.distance_squared(bm.pos2d()) < rr4 {
                             return false;
                         }
                     }
                     true
                 };
                 if i > 0 {
-                    let pos0 = bm0.position - offset;
-                    let pos1 = bm1.position + offset;
+                    let pos0 = bm0.pos2d() - offset;
+                    let pos1 = bm1.pos2d() + offset;
                     if check_move(pos0) && check_move(pos1) {
-                        body_move[i].position = pos0;
-                        body_move[j].position = pos1;
+                        body_move[i].set_pos2d(pos0);
+                        body_move[j].set_pos2d(pos1);
                     }
                 } else {
-                    let pos = bm1.position + 2.0 * offset;
+                    let pos = bm1.pos2d() + 2.0 * offset;
                     if check_move(pos) {
-                        body_move[j].position = pos;
+                        body_move[j].set_pos2d(pos);
                     }
                 }
             });
             for (bm, body) in body_move.iter_mut().skip(1).zip(bodies.iter()) {
-                let origin = body.position.truncate();
-                let distance = origin.distance(bm.position);
+                let origin = body.position.xy();
+                let distance = origin.distance(bm.pos2d());
                 if distance >= min_move / SOLVE_STEP as f32 {
                     if distance > bm.max_move {
-                        bm.position = origin.lerp(bm.position, bm.max_move / distance);
+                        bm.set_pos2d(origin.lerp(bm.pos2d(), bm.max_move / distance));
+                    }
+                    if let Some(f) = fix_position.as_ref() {
+                        bm.position = f(bm.position, body.position);
                     }
                 } else {
-                    bm.position = origin;
+                    bm.set_pos2d(origin);
                 }
             }
         }
 
         for (body, bm) in bodies.iter_mut().zip(body_move.iter().skip(1)) {
-            body.position.x = bm.position.x;
-            body.position.y = bm.position.y;
+            body.position = bm.position;
             body.target = bm.target;
         }
 
@@ -452,7 +464,6 @@ pub struct SnakeBody {
     pub position: Vec3,
     pub target: Vec3,
     pub segment: usize,
-    pub position_prev: Vec3,
 }
 
 impl SnakeBody {
@@ -463,7 +474,6 @@ impl SnakeBody {
             position,
             target: Vec3::ZERO,
             segment: 0,
-            position_prev: position,
         }
     }
 }
