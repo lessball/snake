@@ -390,7 +390,8 @@ impl SnakeHead {
                 }
                 let vertical = Vec2::new(dp.y, -dp.x);
                 let mut angle = 4.0 / SOLVE_STEP as f32;
-                if bm0.delta.dot(vertical) < bm1.delta.dot(vertical) {
+                let rand_offset = (bm0.position + bm1.position).as_ref().iter().sum::<f32>().sin_cos();
+                if (bm0.delta - bm1.delta + Vec2::new(rand_offset.0, rand_offset.1)).dot(vertical) < 0.0 {
                     angle = -angle;
                 }
                 let offset = Mat2::from_angle(angle).mul_vec2(dp) - dp;
