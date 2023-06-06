@@ -13,7 +13,7 @@ pub fn init(ground: Option<&str>) -> App {
     app.init_resource::<Time>()
         .add_plugin(bevy::core::TaskPoolPlugin::default())
         .add_plugin(SnakeLogicPlugin);
-    if let Some(ground) = ground.and_then(|data| GroundMesh::from_obj(data)) {
+    if let Some(ground) = ground.and_then(GroundMesh::from_obj) {
         app.insert_resource(ground);
     }
     app.setup();
@@ -67,7 +67,7 @@ pub fn get_portals(app: &mut App) -> Box<[f32]> {
     let mut query_portal = app.world.query::<(&Portal, &Transform)>();
     let v: Vec<_> = query_portal
         .iter(&app.world)
-        .map(|(p, tm)| {
+        .flat_map(|(p, tm)| {
             [
                 tm.translation.x,
                 tm.translation.y,
@@ -77,7 +77,6 @@ pub fn get_portals(app: &mut App) -> Box<[f32]> {
                 p.0.z,
             ]
         })
-        .flatten()
         .collect();
     v.into_boxed_slice()
 }

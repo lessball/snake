@@ -228,6 +228,79 @@ impl SnakeHead {
         }
     }
 
+    pub fn update_body(&mut self, bodies: &mut [SnakeBody], radius: f32) {
+        if self.dis_rec.is_empty() {
+            return;
+        }
+        let head_pos = self.position.xy();
+        let rr4 = radius * radius * 4.0;
+        let mut min_time = f64::MAX;
+        let mut min_distance = f64::MAX;
+        let mut min_segment = usize::MAX;
+        for i in 0..bodies.len() {
+            let time = self.time - bodies[i].delay as f64;
+            min_time = min_time.min(time);
+            let distance = self.dis_rec.get_linear(time).unwrap() - bodies[i].distance as f64;
+            min_distance = min_distance.min(distance);
+            let iseg = bodies[i].segment.saturating_sub(self.segment_first);
+            if iseg + 1 < self.segments.len() {
+                let can_leave = match self.segments[iseg].move_mode {
+                    MoveMode::Normal => distance >= self.segments[iseg].pos_rec.last().unwrap().key,
+                    MoveMode::Teleport => true,
+                };
+                if can_leave {
+                    match self.segments[iseg + 1].move_mode {
+                        MoveMode::Normal => {
+                            bodies[i].segment += 1;
+                        },
+                        MoveMode::Teleport => {
+                            let pos = self.segments[iseg + 1].pos_rec.last().unwrap().value;
+                            let pos2d = pos.xy();
+                            if pos2d.distance_squared(head_pos) >= rr4
+                                && bodies[..i].iter().all(|body| {
+                                    pos2d.distance_squared(body.position.xy()) >= rr4
+                                })
+                            {
+                                bodies[i].position = pos;
+                                bodies[i].segment += 1;
+                            }
+                        },
+                    };
+                }
+                min_segment = min_segment.min(bodies[i].segment);
+            }
+            match self.segments[iseg].move_mode {
+                MoveMode::Normal => {
+                    let pos_rec = &self.segments[iseg].pos_rec;
+                    bodies[i].target = if distance > pos_rec[0].key {
+                        pos_rec.get_linear(distance).unwrap()
+                    } else {
+                        let p0 = pos_rec[0].value;
+                        let remain = (pos_rec[0].key - distance) as f32;
+                        let dis = p0.xy().distance(bodies[i].position.xy());
+                        if dis > remain {
+                            p0.lerp(bodies[i].position, remain / dis)
+                        } else {
+                            bodies[i].position
+                        }
+                    };
+                },
+                MoveMode::Teleport => {
+                    bodies[i].target = bodies[i].position;
+                },
+            }
+        }
+        if min_segment != usize::MAX && min_segment > self.segment_first {
+            self.segments.drain(0..min_segment - self.segment_first);
+            self.segment_first = min_segment;
+        }
+        self.dis_rec.trim(min_time);
+        match self.segments[0].move_mode {
+            MoveMode::Normal => self.segments[0].pos_rec.trim(min_distance),
+            _ => {},
+        }
+    }
+
     fn foreach_pair<F: FnMut(usize, usize)>(len: usize, mut f: F) {
         for i in 0..len - 1 {
             for j in i + 1..len {
@@ -237,7 +310,7 @@ impl SnakeHead {
     }
 
     pub fn solve_body<F>(
-        &mut self,
+        &self,
         bodies: &mut [SnakeBody],
         max_move: f32,
         min_move: f32,
@@ -245,10 +318,6 @@ impl SnakeHead {
         fix_position: Option<F>
     ) where F: Fn(Vec3, Vec3) -> Vec3
     {
-        if self.dis_rec.is_empty() {
-            return;
-        }
-        let head_pos = self.position.xy();
         let rr4 = radius * radius * 4.0;
 
         struct BodyMove {
@@ -277,74 +346,24 @@ impl SnakeHead {
             target: self.position,
             max_move: 0.0,
         });
-        let mut min_time = f64::MAX;
-        let mut min_distance = f64::MAX;
-        for i in 0..bodies.len() {
-            let time = self.time - bodies[i].delay as f64;
-            min_time = min_time.min(time);
-            let distance = self.dis_rec.get_linear(time).unwrap() - bodies[i].distance as f64;
-            min_distance = min_distance.min(distance);
-            let iseg = bodies[i].segment.saturating_sub(self.segment_first);
-            if iseg + 1 < self.segments.len() {
-                let can_leave = match self.segments[iseg].move_mode {
-                    MoveMode::Normal => distance >= self.segments[iseg].pos_rec.last().unwrap().key,
-                    MoveMode::Teleport => true,
-                };
-                if can_leave {
-                    match self.segments[iseg + 1].move_mode {
-                        MoveMode::Normal => {
-                            bodies[i].segment += 1;
-                        }
-                        MoveMode::Teleport => {
-                            let pos = self.segments[iseg + 1].pos_rec.last().unwrap().value;
-                            let pos2d = pos.xy();
-                            if pos2d.distance_squared(head_pos) >= rr4
-                                && bodies[..i].iter().all(|body| {
-                                    pos2d.distance_squared(body.position.xy()) >= rr4
-                                })
-                            {
-                                bodies[i].position = pos;
-                                bodies[i].segment += 1;
-                            }
-                        }
-                    };
+        for body in bodies.iter() {
+            let mut max_move1 = max_move;
+            let mut delta = Vec2::ZERO;
+            let target_distance = body.target.xy().distance(body.position.xy());
+            if target_distance > 0.0001 {
+                let k: f32 = invert_lerp(1.5, 4.0, target_distance / radius).clamp(0.0, 1.0);
+                max_move1 = max_move * (1.5 + k * 0.5);
+                delta = body.target.xy() - body.position.xy();
+                if target_distance > max_move1 {
+                    delta *= max_move1 / target_distance;
                 }
             }
-            let body = &bodies[i];
-            match self.segments[iseg].move_mode {
-                MoveMode::Normal => {
-                    let pos_rec = &self.segments[iseg].pos_rec;
-                    let (target, remain) = if distance > pos_rec[0].key {
-                        (pos_rec.get_linear(distance).unwrap(), 0.0)
-                    } else {
-                        (pos_rec[0].value, pos_rec[0].key - distance)
-                    };
-                    let current_distance = target.xy().distance(body.position.xy());
-                    let expect_distance = (current_distance - remain.max(0.0) as f32).max(0.0);
-                    let k = invert_lerp(1.5, 4.0, expect_distance / radius).clamp(0.0, 1.0);
-                    let max_move1 = max_move * (1.5 + k * 0.5);
-                    let delta = if current_distance > 0.0001 {
-                        (target.xy() - body.position.xy())
-                            * (expect_distance.min(max_move1) / current_distance)
-                    } else {
-                        Vec2::ZERO
-                    };
-                    body_move.push(BodyMove {
-                        position: body.position,
-                        delta,
-                        target,
-                        max_move: max_move1,
-                    });
-                }
-                MoveMode::Teleport => {
-                    body_move.push(BodyMove {
-                        position: body.position,
-                        delta: Vec2::ZERO,
-                        target: body.position,
-                        max_move,
-                    });
-                }
-            }
+            body_move.push(BodyMove {
+                position: body.position,
+                delta,
+                target: body.target,
+                max_move: max_move1,
+            });
         }
 
         for _ in 0..SOLVE_STEP {
@@ -435,18 +454,6 @@ impl SnakeHead {
 
         for (body, bm) in bodies.iter_mut().zip(body_move.iter().skip(1)) {
             body.position = bm.position;
-            body.target = bm.target;
-        }
-
-        let seg_min = bodies.iter().map(|body| body.segment).min().unwrap();
-        if seg_min > self.segment_first {
-            self.segments.drain(0..seg_min - self.segment_first);
-            self.segment_first = seg_min;
-        }
-        self.dis_rec.trim(min_time);
-        match self.segments[0].move_mode {
-            MoveMode::Normal => self.segments[0].pos_rec.trim(min_distance),
-            _ => {},
         }
     }
 

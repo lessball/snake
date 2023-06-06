@@ -123,6 +123,7 @@ fn follower_move(
         let fix_position = ground.as_ref().map(|g| {
             |p, prev| to_snake(move_on_ground(from_snake(prev), from_snake(p), g))
         });
+        leader.snake_head.update_body(&mut leader.snake_bodys, RADIUS);
         leader.snake_head.solve_body(
             &mut leader.snake_bodys,
             delta_time * SPEED,

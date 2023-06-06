@@ -21,19 +21,19 @@ impl GroundMesh {
         let mut v: Vec<Point<f32>> = Vec::new();
         let mut ind = Vec::new();
         for line in data.lines() {
-            let mut t = line.split(" ");
+            let mut t = line.split(' ');
             match t.next() {
                 Some("v") => {
                     let mut a = [0.0; 3];
-                    for i in 0..3 {
-                        a[i] = t.next()?.parse().ok()?
+                    for i in a.iter_mut() {
+                        *i = t.next()?.parse().ok()?
                     }
                     v.push(Point::new(a[0], a[1], a[2]));
                 }
                 Some("f") => {
                     let mut fv = [0; 3];
-                    for i in 0..3 {
-                        fv[i] = t.next()?.parse::<u32>().ok()? - 1;
+                    for i in fv.iter_mut() {
+                        *i = t.next()?.parse::<u32>().ok()? - 1;
                     }
                     ind.push(fv)
                 }
