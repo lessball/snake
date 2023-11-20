@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use super::ground_mesh::GroundMesh;
+// use super::character_move::character_move;
 use snake_move::*;
 
 pub fn to_snake(v: Vec3) -> Vec3 {
@@ -58,49 +59,52 @@ fn leader_move(
             .and_then(|g| g.ray_cast(ray, 999999.0))
             .unwrap_or_else(|| ray.origin - ray.direction * (ray.origin.y / ray.direction.y))
     });
-    query_leader.par_iter_mut().for_each_mut(|(mut leader, mut tm)| {
-        let mut leader_pos = tm.translation;
-        let mut teleport = false;
-        for (pt, tm) in portal.iter() {
-            if tm.translation.distance_squared(leader_pos) < RADIUS * RADIUS {
-                leader_pos = pt.0;
-                teleport = true;
-                break;
-            }
-        }
-        if !teleport {
-            let max_distance = delta_time * SPEED;
-            let move_delta = if let Some(p) = target {
-                let mut v = p - leader_pos;
-                v.y = 0.0;
-                let len = v.length();
-                if len > max_distance {
-                    v *= max_distance / len;
+    query_leader
+        .par_iter_mut()
+        .for_each(|(mut leader, mut tm)| {
+            let mut leader_pos = tm.translation;
+            let mut teleport = false;
+            for (pt, tm) in portal.iter() {
+                if tm.translation.distance_squared(leader_pos) < RADIUS * RADIUS {
+                    leader_pos = pt.0;
+                    teleport = true;
+                    break;
                 }
-                v
-            } else {
-                Vec3::new(input.axis.x, 0.0, -input.axis.y) * max_distance
-            };
-            leader_pos += move_delta;
-        }
-        if let Some(g) = ground {
-            if !teleport {
-                leader_pos = move_on_ground(tm.translation, leader_pos, g);
-            } else {
-                leader_pos = g.fix_position(leader_pos, 3.0, RADIUS);
             }
-        }
-        leader.snake_head.move_head(
-            delta_time as f64,
-            to_snake(leader_pos),
-            if teleport {
-                MoveMode::Teleport
-            } else {
-                MoveMode::Normal
-            },
-        );
-        tm.translation = leader_pos;
-    });
+            if !teleport {
+                let max_distance = delta_time * SPEED;
+                let move_delta = if let Some(p) = target {
+                    let mut v = p - leader_pos;
+                    v.y = 0.0;
+                    let len = v.length();
+                    if len > max_distance {
+                        v *= max_distance / len;
+                    }
+                    v
+                } else {
+                    Vec3::new(input.axis.x, 0.0, -input.axis.y) * max_distance
+                };
+                leader_pos += move_delta;
+            }
+            if let Some(g) = ground {
+                if !teleport {
+                    leader_pos = move_on_ground(tm.translation, leader_pos, g);
+                    // leader_pos = character_move(tm.translation, leader_pos, RADIUS, &g.mesh, 1.5, false);
+                } else {
+                    leader_pos = g.fix_position(leader_pos, 3.0, RADIUS);
+                }
+            }
+            leader.snake_head.move_head(
+                delta_time as f64,
+                to_snake(leader_pos),
+                if teleport {
+                    MoveMode::Teleport
+                } else {
+                    MoveMode::Normal
+                },
+            );
+            tm.translation = leader_pos;
+        });
 }
 
 fn follower_move(
@@ -111,7 +115,7 @@ fn follower_move(
 ) {
     let delta_time = time.delta_seconds();
     // let delta_time = 1.0 / 60.0;
-    query_leader.par_iter_mut().for_each_mut(|mut leader| {
+    query_leader.par_iter_mut().for_each(|mut leader| {
         let leader = &mut *leader;
         for (body, tm) in leader
             .snake_bodys
@@ -121,15 +125,19 @@ fn follower_move(
             body.position = to_snake(tm.translation);
         }
         let fix_position = ground.as_ref().map(|g| {
-            |p, prev| to_snake(move_on_ground(from_snake(prev), from_snake(p), g))
+            |_body: &SnakeBody, pos, prev| {
+                to_snake(move_on_ground(from_snake(prev), from_snake(pos), g))
+            }
         });
-        leader.snake_head.update_body(&mut leader.snake_bodys, RADIUS);
+        leader
+            .snake_head
+            .update_body(&mut leader.snake_bodys, RADIUS);
         leader.snake_head.solve_body(
             &mut leader.snake_bodys,
             delta_time * SPEED,
             delta_time * SPEED * 0.1,
             RADIUS,
-            fix_position
+            fix_position,
         );
         if let Some(g) = ground.as_ref() {
             for body in leader.snake_bodys.iter_mut() {
@@ -220,8 +228,7 @@ pub struct SnakeLogicPlugin;
 impl Plugin for SnakeLogicPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MovementInput>()
-            .add_system(leader_move)
-            .add_system(follower_move.after(leader_move))
-            .add_startup_system(setup_logic);
+            .add_systems(Startup, setup_logic)
+            .add_systems(Update, (leader_move, follower_move.after(leader_move)));
     }
 }

@@ -9,7 +9,7 @@ use parry3d::shape::{Ball, TriMesh, TypedSimdCompositeShape};
 
 #[derive(Resource)]
 pub struct GroundMesh {
-    mesh: TriMesh,
+    pub mesh: TriMesh,
 }
 
 impl GroundMesh {
@@ -42,7 +42,7 @@ impl GroundMesh {
         }
         let ground_mesh = GroundMesh::new(TriMesh::new(v, ind));
         Some(ground_mesh)
-    }    
+    }
 
     pub fn fix_position(&self, mut p: Vec3, d: f32, h: f32) -> Vec3 {
         p.y -= h;

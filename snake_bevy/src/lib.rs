@@ -3,20 +3,20 @@ pub use bevy::prelude::App;
 use bevy::prelude::*;
 use bevy::utils::{Duration, Instant};
 
-mod logic;
-use logic::*;
+// mod character_move;
 mod ground_mesh;
+mod logic;
+
 use ground_mesh::GroundMesh;
+use logic::*;
 
 pub fn init(ground: Option<&str>) -> App {
     let mut app = App::new();
-    app.init_resource::<Time>()
-        .add_plugin(bevy::core::TaskPoolPlugin::default())
-        .add_plugin(SnakeLogicPlugin);
+    app.init_resource::<Time<Real>>()
+        .add_plugins((bevy::core::TaskPoolPlugin::default(), SnakeLogicPlugin));
     if let Some(ground) = ground.and_then(GroundMesh::from_obj) {
         app.insert_resource(ground);
     }
-    app.setup();
     app
 }
 
@@ -27,7 +27,7 @@ pub fn update(
     input_axis: &[f32],
     position: &mut [f32],
 ) {
-    if let Some(mut time) = app.world.get_resource_mut::<Time>() {
+    if let Some(mut time) = app.world.get_resource_mut::<Time<Real>>() {
         let t = time
             .last_update()
             .map_or_else(Instant::now, |t| t + Duration::from_secs_f32(delta_time));

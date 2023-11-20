@@ -1,17 +1,20 @@
-use bevy::prelude::*;
-use bevy::asset::FileAssetIo;
-use bevy::input::InputSystem;
+use bevy::asset::io::file::FileAssetReader;
 use bevy::pbr::NotShadowCaster;
-use bevy_prototype_debug_lines::{ DebugLines, DebugLinesPlugin };
+use bevy::prelude::*;
+use bevy::window;
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::fs;
 
 use snake_move::*;
 
-mod logic;
-use logic::*;
+// mod character_move;
 mod ground_mesh;
+mod lines;
+mod logic;
+
 use ground_mesh::GroundMesh;
+use logic::*;
 
 fn movement_input(
     mut movement_input: ResMut<MovementInput>,
@@ -37,46 +40,14 @@ fn movement_input(
     };
 }
 
-fn update_lines(
-    query_leader: Query<&Leader>,
-    mut lines: ResMut<DebugLines>,
-    query_tm: Query<&Transform>,
-    keyboard_input: Res<Input<KeyCode>>,
-    mut show: Local<(bool, bool)>,
-) {
-    if keyboard_input.just_pressed(KeyCode::P) {
-        show.0 = !show.0;
-    }
-    if keyboard_input.just_pressed(KeyCode::T) {
-        show.1 = !show.1;
-    }
-    if show.0 || show.1 {
-        for leader in query_leader.iter() {
-            if show.0 {
-                let mut iter_path = leader.snake_head.get_path().map(from_snake);
-                if let Some(mut p0) = iter_path.next() {
-                    for p1 in iter_path {
-                        lines.line_colored(p0, p1, 0.0, Color::GRAY);
-                        p0 = p1;
-                    }
-                }
-            }
-            if show.1 {
-                let iter_tm = query_tm.iter_many(&leader.followers);
-                for (i, (body, tm)) in leader.snake_bodys.iter().zip(iter_tm).enumerate() {
-                    lines.line_colored(tm.translation, from_snake(body.target), 0.0, color(i + 1) * 0.9);
-                }
-            }
-        }
-    }
-}
-
+#[cfg(feature = "serde")]
 #[derive(Serialize, Deserialize)]
 struct SaveData {
     snake_head: SnakeHead,
     snake_bodys: Vec<SnakeBody>,
 }
 
+#[cfg(feature = "serde")]
 fn save_load(
     keyboard_input: Res<Input<KeyCode>>,
     mut query_leader: Query<(&mut Leader, &mut Transform)>,
@@ -89,9 +60,9 @@ fn save_load(
             snake_bodys: leader.snake_bodys.clone(),
         };
         let serialized = serde_json::to_string(&data).unwrap();
-        std::fs::write("save.json", serialized).unwrap();
+        fs::write("save.json", serialized).unwrap();
     } else if keyboard_input.just_pressed(KeyCode::X) {
-        if let Ok(s) = std::fs::read_to_string("save.json") {
+        if let Ok(s) = fs::read_to_string("save.json") {
             if let Ok(data) = serde_json::from_str::<SaveData>(&s) {
                 let (mut leader, mut leader_tm) = query_leader.single_mut();
                 leader.snake_head = data.snake_head;
@@ -187,6 +158,7 @@ fn setup_render(
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
             shadows_enabled: true,
+            illuminance: 30000.0,
             ..default()
         },
         transform: Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -1.5, -1.5, 0.0)),
@@ -202,12 +174,13 @@ pub struct SnakePlugin;
 
 impl Plugin for SnakePlugin {
     fn build(&self, app: &mut App) {
-        app.add_system(movement_input.in_base_set(CoreSet::PreUpdate).after(InputSystem))
-            .add_system(update_lines.in_base_set(CoreSet::PostUpdate))
-            .add_system(save_load)
-            .add_system(bevy::window::close_on_esc)
-            .add_startup_system(setup_render.in_base_set(StartupSet::PostStartup));
-        let ground_path = FileAssetIo::get_base_path().join("assets/ground.obj");
+        app.add_systems(PostStartup, setup_render)
+            .add_systems(PreUpdate, movement_input)
+            .add_systems(Update, window::close_on_esc);
+        #[cfg(feature = "serde")]
+        app.add_systems(Update, save_load);
+
+        let ground_path = FileAssetReader::get_base_path().join("assets/ground.obj");
         let ground_data = fs::read_to_string(ground_path).ok();
         if let Some(ground) = ground_data.and_then(|data| GroundMesh::from_obj(&data)) {
             app.insert_resource(ground);
@@ -217,9 +190,11 @@ impl Plugin for SnakePlugin {
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
-        .add_plugin(SnakeLogicPlugin)
-        .add_plugin(SnakePlugin)
-        .add_plugin(DebugLinesPlugin::default())
+        .add_plugins((
+            DefaultPlugins,
+            SnakeLogicPlugin,
+            SnakePlugin,
+            lines::LinesPlugin,
+        ))
         .run();
 }
