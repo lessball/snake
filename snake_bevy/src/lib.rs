@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 pub use bevy::prelude::App;
 use bevy::prelude::*;
-use bevy::utils::{Duration, Instant};
+use bevy::utils::Duration;
 
 // mod character_move;
 mod ground_mesh;
@@ -12,7 +12,7 @@ use logic::*;
 
 pub fn init(ground: Option<&str>) -> App {
     let mut app = App::new();
-    app.init_resource::<Time<Real>>()
+    app.init_resource::<Time>()
         .add_plugins((bevy::core::TaskPoolPlugin::default(), SnakeLogicPlugin));
     if let Some(ground) = ground.and_then(GroundMesh::from_obj) {
         app.insert_resource(ground);
@@ -27,11 +27,8 @@ pub fn update(
     input_axis: &[f32],
     position: &mut [f32],
 ) {
-    if let Some(mut time) = app.world.get_resource_mut::<Time<Real>>() {
-        let t = time
-            .last_update()
-            .map_or_else(Instant::now, |t| t + Duration::from_secs_f32(delta_time));
-        time.update_with_instant(t);
+    if let Some(mut time) = app.world.get_resource_mut::<Time>() {
+        time.advance_by(Duration::from_secs_f32(delta_time));
     }
     if let Some(mut m) = app.world.get_resource_mut::<MovementInput>() {
         let ray_dir = Vec3::from_slice(&input_ray[3..6]);
