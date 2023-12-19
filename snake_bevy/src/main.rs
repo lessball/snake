@@ -44,7 +44,6 @@ fn movement_input(
 #[derive(Serialize, Deserialize)]
 struct SaveData {
     snake_head: SnakeHead,
-    snake_bodys: Vec<SnakeBody>,
 }
 
 #[cfg(feature = "serde")]
@@ -57,7 +56,6 @@ fn save_load(
         let (leader, _) = query_leader.single();
         let data = SaveData {
             snake_head: leader.snake_head.clone(),
-            snake_bodys: leader.snake_bodys.clone(),
         };
         let serialized = serde_json::to_string(&data).unwrap();
         fs::write("save.json", serialized).unwrap();
@@ -66,14 +64,13 @@ fn save_load(
             if let Ok(data) = serde_json::from_str::<SaveData>(&s) {
                 let (mut leader, mut leader_tm) = query_leader.single_mut();
                 leader.snake_head = data.snake_head;
-                leader.snake_bodys = data.snake_bodys;
-                leader_tm.translation = leader.snake_head.head_position();
+                leader_tm.translation = from_snake(leader.snake_head.bodies[0].position);
                 let mut iter_follower_tm = query_tm.iter_many_mut(&leader.followers);
-                let mut iter_body = leader.snake_bodys.iter();
+                let mut iter_body = leader.snake_head.bodies.iter().skip(1);
                 while let (Some(mut tm), Some(body)) =
                     (iter_follower_tm.fetch_next(), iter_body.next())
                 {
-                    tm.translation = body.position;
+                    tm.translation = from_snake(body.position);
                 }
             }
         }
