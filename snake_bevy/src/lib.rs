@@ -90,7 +90,13 @@ pub fn get_path(app: &mut App, path: &mut [f32]) -> u32 {
 
 pub fn get_targets(app: &mut App, targets: &mut [f32]) {
     let leader = app.world.query::<&Leader>().single(&app.world);
-    for (body, p1) in leader.snake_bodys.iter().zip(targets.chunks_mut(3)) {
+    for (body, p1) in leader
+        .snake_head
+        .bodies
+        .iter()
+        .skip(1)
+        .zip(targets.chunks_mut(3))
+    {
         p1.copy_from_slice(from_snake(body.target).as_ref());
     }
 }

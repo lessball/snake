@@ -66,7 +66,14 @@ fn update_lines(
                 }
                 if show.1 {
                     let iter_tm = query_tm.iter_many(&leader.followers);
-                    for (i, (body, tm)) in leader.snake_bodys.iter().zip(iter_tm).enumerate() {
+                    for (i, (body, tm)) in leader
+                        .snake_head
+                        .bodies
+                        .iter()
+                        .skip(1)
+                        .zip(iter_tm)
+                        .enumerate()
+                    {
                         if let Some(VertexAttributeValues::Float32x3(positions)) =
                             mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
                         {
